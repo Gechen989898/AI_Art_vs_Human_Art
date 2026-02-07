@@ -147,7 +147,6 @@ We will train and compare multiple models using transfer learning:
 | **EfficientNetB4** | 80-84% | Improved accuracy |
 | **Xception** | 85-90% | Gold standard for AI/deepfake detection - excels at texture & noise patterns |
 | **Vision Transformer (ViT-B)** | 83-87% | Transformer-based approach |
-| **Ensemble** (Optional) | 87-92% | Combine best models |
 
 > 💡 **Why Xception?** Xception uses "depthwise separable convolutions" which are exceptionally good at detecting *texture* and *noise* patterns rather than just shapes. It's the architecture behind most successful DeepFake detectors and is particularly effective at spotting the "glossy" or "smooth" texture that AI models like Midjourney often produce.
 
