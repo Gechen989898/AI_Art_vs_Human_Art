@@ -1,1 +1,5 @@
 raw_data/
+merged_data/
+*.png
+*.jpeg
+.DS_Store
