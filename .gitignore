@@ -3,3 +3,5 @@ merged_data/
 *.png
 *.jpeg
 .DS_Store
+*.keras
+*.h5
