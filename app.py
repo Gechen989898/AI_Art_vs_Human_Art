@@ -9,6 +9,8 @@ import time
 import base64
 import json
 from streamlit_javascript import st_javascript
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
 # Page configuration
 st.set_page_config(
@@ -303,6 +305,124 @@ def create_gauge_svg(confidence: float, is_ai: bool) -> str:
     return svg
 
 
+def get_last_conv_layer_name(model):
+    """Find the name of the last convolutional layer in the model"""
+    for layer in reversed(model.layers):
+        if isinstance(layer, keras.layers.Conv2D):
+            return layer.name
+    return None
+
+
+def generate_gradcam(model, img_array: np.ndarray, pred_class: int = None) -> np.ndarray:
+    """
+    Generate Grad-CAM heatmap for the given image.
+    
+    Args:
+        model: The trained Keras model
+        img_array: Preprocessed image array (1, 128, 128, 3)
+        pred_class: Class index to explain (None = use predicted class)
+    
+    Returns:
+        Heatmap as numpy array (128, 128) with values 0-1
+    """
+    try:
+        # Find the last conv layer
+        last_conv_layer_name = get_last_conv_layer_name(model)
+        if last_conv_layer_name is None:
+            return None
+        
+        # Build the model if it hasn't been built yet (for Sequential models)
+        if not model.built:
+            model.build(input_shape=(None, 128, 128, 3))
+        
+        # For Sequential models, we need to create explicit input
+        inputs = keras.Input(shape=(128, 128, 3))
+        x = inputs
+        
+        # Rebuild the model with explicit input to get intermediate outputs
+        last_conv_output = None
+        for layer in model.layers:
+            x = layer(x)
+            if layer.name == last_conv_layer_name:
+                last_conv_output = x
+        
+        if last_conv_output is None:
+            return None
+        
+        # Create a model that outputs both the conv layer output and final prediction
+        grad_model = keras.Model(inputs=inputs, outputs=[last_conv_output, x])
+        
+        # Compute gradients
+        with tf.GradientTape() as tape:
+            conv_outputs, predictions = grad_model(img_array)
+            if pred_class is None:
+                # For binary classification: class 0 if prediction < 0.5, class 1 otherwise
+                pred_class = 1 if predictions[0][0] >= 0.5 else 0
+            
+            # For binary sigmoid output, we use the prediction directly
+            if pred_class == 1:
+                class_output = predictions[0][0]  # Real photo (score towards 1)
+            else:
+                class_output = 1 - predictions[0][0]  # AI generated (score towards 0)
+        
+        # Compute gradients of the class output with respect to the conv layer
+        grads = tape.gradient(class_output, conv_outputs)
+        
+        if grads is None:
+            return None
+        
+        # Global average pooling of gradients
+        pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
+        
+        # Weight the conv outputs by the pooled gradients
+        conv_outputs = conv_outputs[0]
+        heatmap = tf.reduce_sum(conv_outputs * pooled_grads, axis=-1)
+        
+        # ReLU and normalize
+        heatmap = tf.maximum(heatmap, 0)
+        heatmap = heatmap / (tf.reduce_max(heatmap) + keras.backend.epsilon())
+        
+        return heatmap.numpy()
+    
+    except Exception as e:
+        # If Grad-CAM fails for any reason, return None gracefully
+        print(f"Grad-CAM error: {e}")
+        return None
+
+
+def create_gradcam_overlay(image: Image.Image, heatmap: np.ndarray, alpha: float = 0.4) -> Image.Image:
+    """
+    Overlay Grad-CAM heatmap on the original image.
+    
+    Args:
+        image: Original PIL Image
+        heatmap: Grad-CAM heatmap (H, W) with values 0-1
+        alpha: Transparency for the heatmap overlay
+    
+    Returns:
+        PIL Image with heatmap overlay
+    """
+    # Resize image to match our model input for consistent overlay
+    img = image.copy().convert("RGB")
+    original_size = img.size
+    
+    # Resize heatmap to match original image size
+    heatmap_resized = np.array(Image.fromarray((heatmap * 255).astype(np.uint8)).resize(
+        original_size, Image.Resampling.BILINEAR
+    )) / 255.0
+    
+    # Apply colormap (jet)
+    colormap = cm.get_cmap('jet')
+    heatmap_colored = colormap(heatmap_resized)
+    heatmap_colored = (heatmap_colored[:, :, :3] * 255).astype(np.uint8)
+    heatmap_pil = Image.fromarray(heatmap_colored)
+    
+    # Blend with original image
+    overlaid = Image.blend(img, heatmap_pil, alpha)
+    
+    return overlaid
+
+
 def create_result_image(image: Image.Image, label: str, confidence: float) -> bytes:
     """Create a downloadable result image with prediction overlay"""
     # Create a copy and resize for consistent output
@@ -483,6 +603,12 @@ if model_loaded:
             label, emoji, confidence, raw_score = predict(model, img_array)
             is_ai = "AI" in label
             
+            # Generate Grad-CAM heatmap
+            gradcam_heatmap = generate_gradcam(model, img_array)
+            gradcam_overlay = None
+            if gradcam_heatmap is not None:
+                gradcam_overlay = create_gradcam_overlay(image, gradcam_heatmap)
+            
             # Add to history with image thumbnail
             add_to_history(label, confidence, is_ai, image)
         
@@ -561,6 +687,42 @@ if model_loaded:
                 real_pct = raw_score * 100
                 st.progress(ai_pct / 100, text=f"AI: {ai_pct:.1f}%")
                 st.progress(real_pct / 100, text=f"Real: {real_pct:.1f}%")
+        
+        # Grad-CAM Explainability Section
+        if gradcam_overlay is not None:
+            st.markdown("---")
+            st.markdown("### 🔥 Model Explainability (Grad-CAM)")
+            st.markdown("""
+            <p style="color: #868e96; font-size: 0.9rem;">
+                The heatmap shows which regions the model focused on to make its prediction. 
+                <b style="color: #ff6b6b;">Red/yellow</b> areas had the most influence.
+            </p>
+            """, unsafe_allow_html=True)
+            
+            gcam_col1, gcam_col2 = st.columns(2)
+            
+            with gcam_col1:
+                st.markdown("**Original Image**")
+                st.image(image, use_container_width=True)
+            
+            with gcam_col2:
+                st.markdown("**Attention Heatmap**")
+                st.image(gradcam_overlay, use_container_width=True)
+            
+            with st.expander("💡 How to interpret Grad-CAM"):
+                st.markdown("""
+                **Grad-CAM (Gradient-weighted Class Activation Mapping)** visualizes which parts 
+                of the image were most important for the model's prediction.
+                
+                - **Red/Yellow regions**: High importance - the model focused heavily on these areas
+                - **Blue/Green regions**: Lower importance - less influential for the prediction
+                - **Concentrated heat**: Model found specific discriminative features
+                - **Diffuse heat**: Model looked at the overall image structure
+                
+                **Common patterns:**
+                - AI images often show uniform attention or focus on texture artifacts
+                - Real photos typically show attention on semantic objects (faces, animals, etc.)
+                """)
 
     # Footer section
     st.markdown("---")
