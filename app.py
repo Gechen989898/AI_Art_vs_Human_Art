@@ -8,6 +8,7 @@ from io import BytesIO
 import time
 import base64
 import json
+import hashlib
 from streamlit_javascript import st_javascript
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
@@ -34,6 +35,8 @@ if "current_prediction_id" not in st.session_state:
     st.session_state.current_prediction_id = None
 if "feedback_given" not in st.session_state:
     st.session_state.feedback_given = False
+if "processed_images" not in st.session_state:
+    st.session_state.processed_images = {}  # hash -> {label, confidence, time}
 
 # Load history from localStorage on first run (st_javascript is async)
 if not st.session_state.history_loaded:
@@ -669,9 +672,22 @@ if model_loaded:
                     for idx, file in enumerate(batch_files):
                         try:
                             img = Image.open(file)
+                            
+                            # Check for duplicate
+                            img_bytes = img.tobytes()
+                            img_hash = hashlib.md5(img_bytes).hexdigest()
+                            is_duplicate = img_hash in st.session_state.processed_images
+                            
                             img_array = preprocess_image(img)
                             label, emoji, confidence, raw_score = predict(model, img_array)
                             is_ai = "AI" in label
+                            
+                            # Cache the result
+                            st.session_state.processed_images[img_hash] = {
+                                "label": label,
+                                "confidence": confidence,
+                                "time": time.strftime("%H:%M:%S")
+                            }
                             
                             st.session_state.batch_results.append({
                                 "filename": file.name,
@@ -680,7 +696,8 @@ if model_loaded:
                                 "raw_score": round(raw_score, 4),
                                 "is_ai": is_ai,
                                 "emoji": emoji,
-                                "thumbnail": image_to_base64_thumbnail(img)
+                                "thumbnail": image_to_base64_thumbnail(img),
+                                "is_duplicate": is_duplicate
                             })
                         except Exception as e:
                             st.session_state.batch_results.append({
@@ -690,7 +707,8 @@ if model_loaded:
                                 "raw_score": 0,
                                 "is_ai": False,
                                 "emoji": "❌",
-                                "thumbnail": ""
+                                "thumbnail": "",
+                                "is_duplicate": False
                             })
                         
                         progress_bar.progress((idx + 1) / len(batch_files), 
@@ -708,17 +726,20 @@ if model_loaded:
                 total = len(st.session_state.batch_results)
                 ai_count = sum(1 for r in st.session_state.batch_results if r["is_ai"])
                 real_count = total - ai_count
+                dup_count = sum(1 for r in st.session_state.batch_results if r.get("is_duplicate", False))
                 
-                stat_cols = st.columns(3)
+                stat_cols = st.columns(4)
                 stat_cols[0].metric("Total Images", total)
                 stat_cols[1].metric("🤖 AI Generated", ai_count)
                 stat_cols[2].metric("📷 Real Photos", real_count)
+                stat_cols[3].metric("🔄 Duplicates", dup_count)
                 
                 st.markdown("---")
                 
                 # Results table with thumbnails
                 for result in st.session_state.batch_results:
                     border_color = "#ff6b6b" if result["is_ai"] else "#51cf66"
+                    is_dup = result.get("is_duplicate", False)
                     
                     col_thumb, col_info, col_conf = st.columns([1, 3, 2])
                     
@@ -727,7 +748,8 @@ if model_loaded:
                             st.markdown(f'<img src="data:image/jpeg;base64,{result["thumbnail"]}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 8px; border: 2px solid {border_color};"/>', unsafe_allow_html=True)
                     
                     with col_info:
-                        st.markdown(f"**{result['filename']}**")
+                        dup_badge = " 🔄" if is_dup else ""
+                        st.markdown(f"**{result['filename']}**{dup_badge}")
                         st.markdown(f"{result['emoji']} {result['prediction']}")
                     
                     with col_conf:
@@ -735,13 +757,17 @@ if model_loaded:
                     
                     st.markdown("<hr style='margin: 0.5rem 0; border: none; border-top: 1px solid #3a3a3a;'>", unsafe_allow_html=True)
                 
+                if dup_count > 0:
+                    st.caption(f"🔄 = Previously analyzed image ({dup_count} duplicate{'s' if dup_count > 1 else ''} found)")
+                
                 # Export to CSV button
                 st.markdown("### 💾 Export Results")
                 
                 # Create CSV data
-                csv_data = "Filename,Prediction,Confidence (%),Raw Score\n"
+                csv_data = "Filename,Prediction,Confidence (%),Raw Score,Duplicate\n"
                 for r in st.session_state.batch_results:
-                    csv_data += f"{r['filename']},{r['prediction']},{r['confidence']},{r['raw_score']}\n"
+                    is_dup = "Yes" if r.get("is_duplicate", False) else "No"
+                    csv_data += f"{r['filename']},{r['prediction']},{r['confidence']},{r['raw_score']},{is_dup}\n"
                 
                 st.download_button(
                     label="📥 Download CSV",
@@ -754,6 +780,26 @@ if model_loaded:
     # Results section
     if image is not None:
         st.markdown("---")
+        
+        # Compute image hash for duplicate detection
+        img_bytes = image.tobytes()
+        img_hash = hashlib.md5(img_bytes).hexdigest()
+        
+        # Check if image was already processed
+        is_duplicate = img_hash in st.session_state.processed_images
+        
+        if is_duplicate:
+            prev = st.session_state.processed_images[img_hash]
+            st.warning(f"""
+            ⚠️ **Duplicate Image Detected!**  
+            This image was already analyzed at **{prev['time']}**  
+            Previous result: **{prev['label']}** ({prev['confidence']:.1f}% confidence)
+            """)
+            
+            reanalyze = st.checkbox("🔄 Re-analyze anyway", key=f"reanalyze_{img_hash}")
+            if not reanalyze:
+                st.info("👆 Check the box above to re-analyze this image")
+                st.stop()
         
         # Analyze with animation
         with st.spinner("🔍 Analyzing image..."):
@@ -768,8 +814,16 @@ if model_loaded:
             if gradcam_heatmap is not None:
                 gradcam_overlay = create_gradcam_overlay(image, gradcam_heatmap)
             
-            # Add to history with image thumbnail
-            add_to_history(label, confidence, is_ai, image)
+            # Store in processed images cache
+            st.session_state.processed_images[img_hash] = {
+                "label": label,
+                "confidence": confidence,
+                "time": time.strftime("%H:%M:%S")
+            }
+            
+            # Add to history with image thumbnail (only if not a re-analysis)
+            if not is_duplicate:
+                add_to_history(label, confidence, is_ai, image)
         
         # Results in columns
         col1, col2, col3 = st.columns([1, 1, 1])
