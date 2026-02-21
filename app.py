@@ -1,11 +1,14 @@
 import streamlit as st
 import tensorflow as tf
 from tensorflow import keras
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 import requests
 from io import BytesIO
 import time
+import base64
+import json
+from streamlit_javascript import st_javascript
 
 # Page configuration
 st.set_page_config(
@@ -13,6 +16,43 @@ st.set_page_config(
     page_icon="🎨",
     layout="wide"
 )
+
+# Initialize session state for history
+if "history" not in st.session_state:
+    st.session_state.history = []
+if "history_loaded" not in st.session_state:
+    st.session_state.history_loaded = False
+if "load_attempt" not in st.session_state:
+    st.session_state.load_attempt = 0
+
+# Load history from localStorage on first run (st_javascript is async)
+if not st.session_state.history_loaded:
+    stored_history = st_javascript("localStorage.getItem('ai_classifier_history')")
+    
+    # st_javascript returns 0 on first render, then actual data on rerender
+    if stored_history == 0:
+        # First render - JS hasn't executed yet, increment attempt counter
+        st.session_state.load_attempt += 1
+        if st.session_state.load_attempt < 3:
+            time.sleep(0.1)
+            st.rerun()
+    else:
+        # JS has returned - either data or null
+        if stored_history and stored_history != "null" and isinstance(stored_history, str):
+            try:
+                loaded_history = json.loads(stored_history)
+                if isinstance(loaded_history, list) and len(loaded_history) > 0:
+                    st.session_state.history = loaded_history
+            except (json.JSONDecodeError, TypeError):
+                pass
+        st.session_state.history_loaded = True
+
+# Sample images for quick testing
+SAMPLE_IMAGES = {
+    "🌄 Landscape": "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=400",
+    "🐕 Dog": "https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400",
+    "🌸 Flower": "https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=400",
+}
 
 # Custom CSS for better styling
 st.markdown("""
@@ -50,24 +90,41 @@ st.markdown("""
         margin: 0.5rem 0;
     }
     
-    .stat-number {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #495057;
+    /* Upload area styling - Enhanced drop zone for dark mode */
+    [data-testid="stFileUploader"] {
+        border: 3px dashed #667eea !important;
+        border-radius: 1.5rem !important;
+        padding: 2rem !important;
+        background: linear-gradient(135deg, #1e1e2e 0%, #2d2d3d 100%) !important;
+        transition: all 0.3s ease !important;
     }
     
-    .stat-label {
-        color: #868e96;
-        font-size: 0.9rem;
+    [data-testid="stFileUploader"]:hover {
+        border-color: #764ba2 !important;
+        background: linear-gradient(135deg, #2d2d3d 0%, #3d3d4d 100%) !important;
+        transform: scale(1.01);
     }
     
-    /* Upload area styling */
-    .upload-section {
-        border: 2px dashed #dee2e6;
-        border-radius: 1rem;
-        padding: 2rem;
-        text-align: center;
-        margin: 1rem 0;
+    /* Fix file uploader text contrast */
+    [data-testid="stFileUploader"] label,
+    [data-testid="stFileUploader"] p,
+    [data-testid="stFileUploader"] span,
+    [data-testid="stFileUploader"] small {
+        color: #ffffff !important;
+    }
+    
+    /* File name in uploader */
+    [data-testid="stFileUploader"] [data-testid="stMarkdownContainer"] p {
+        color: #e0e0e0 !important;
+    }
+    
+    /* Uploaded file info */
+    .uploadedFile {
+        color: #ffffff !important;
+    }
+    
+    .uploadedFileName {
+        color: #ffffff !important;
     }
     
     /* Footer */
@@ -82,6 +139,84 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
+    /* Animated gauge */
+    .gauge-container {
+        position: relative;
+        width: 200px;
+        height: 200px;
+        margin: 0 auto;
+    }
+    
+    .gauge-bg {
+        fill: none;
+        stroke: #e9ecef;
+        stroke-width: 20;
+    }
+    
+    .gauge-fill {
+        fill: none;
+        stroke-width: 20;
+        stroke-linecap: round;
+        transform: rotate(-90deg);
+        transform-origin: 50% 50%;
+        animation: gaugeAnimation 1s ease-out forwards;
+    }
+    
+    .gauge-fill-ai {
+        stroke: url(#gradient-ai);
+    }
+    
+    .gauge-fill-real {
+        stroke: url(#gradient-real);
+    }
+    
+    @keyframes gaugeAnimation {
+        from { stroke-dashoffset: 283; }
+    }
+    
+    .gauge-text {
+        font-size: 2.5rem;
+        font-weight: bold;
+        fill: #495057;
+    }
+    
+    .gauge-label {
+        font-size: 0.9rem;
+        fill: #868e96;
+    }
+    
+    /* Sample image buttons */
+    .sample-btn {
+        padding: 0.5rem 1rem;
+        border-radius: 0.5rem;
+        border: 1px solid #dee2e6;
+        background: white;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .sample-btn:hover {
+        background: #f8f9fa;
+        border-color: #667eea;
+    }
+    
+    /* History item */
+    .history-item {
+        padding: 0.5rem;
+        border-radius: 0.5rem;
+        margin: 0.5rem 0;
+        background: #f8f9fa;
+        border-left: 4px solid;
+    }
+    
+    .history-ai {
+        border-left-color: #ff6b6b;
+    }
+    
+    .history-real {
+        border-left-color: #51cf66;
+    }
+    
     /* Smooth animations */
     .stProgress > div > div > div > div {
         background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
@@ -91,7 +226,7 @@ st.markdown("""
 
 # Constants
 IMG_SIZE = (128, 128)
-MODEL_PATH = "basic_cnn.keras"
+MODEL_PATH = "models/basic_cnn.keras"
 
 
 @st.cache_resource
@@ -137,6 +272,129 @@ def load_image_from_url(url: str) -> Image.Image:
     return image
 
 
+def create_gauge_svg(confidence: float, is_ai: bool) -> str:
+    """Create an animated SVG gauge for confidence display"""
+    # Calculate stroke-dashoffset based on actual radius
+    radius = 42
+    circumference = 2 * 3.14159 * radius  # ≈ 263.89
+    offset = circumference - (confidence / 100 * circumference)
+    
+    color = "#ff6b6b" if is_ai else "#51cf66"
+    
+    svg = f"""
+    <div style="position: relative; width: 180px; height: 180px; margin: 0 auto;">
+        <svg width="180" height="180" viewBox="0 0 100 100" style="transform: rotate(-90deg);">
+            <!-- Background circle -->
+            <circle cx="50" cy="50" r="{radius}" fill="none" stroke="#3a3a3a" stroke-width="8"/>
+            <!-- Progress circle -->
+            <circle cx="50" cy="50" r="{radius}" fill="none" stroke="{color}" 
+                    stroke-width="8" stroke-linecap="round"
+                    stroke-dasharray="{circumference}"
+                    stroke-dashoffset="{offset}"/>
+        </svg>
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
+            <div style="font-size: 2.2rem; font-weight: bold; color: {color};">
+                {confidence:.0f}%
+            </div>
+            <div style="font-size: 0.75rem; color: #888; margin-top: -5px;">confidence</div>
+        </div>
+    </div>
+    """
+    return svg
+
+
+def create_result_image(image: Image.Image, label: str, confidence: float) -> bytes:
+    """Create a downloadable result image with prediction overlay"""
+    # Create a copy and resize for consistent output
+    img = image.copy()
+    img = img.convert("RGB")
+    
+    # Resize to max 800px width while maintaining aspect ratio
+    max_width = 800
+    if img.width > max_width:
+        ratio = max_width / img.width
+        new_size = (max_width, int(img.height * ratio))
+        img = img.resize(new_size, Image.Resampling.LANCZOS)
+    
+    draw = ImageDraw.Draw(img)
+    
+    # Create overlay banner at bottom
+    banner_height = 60
+    banner_y = img.height - banner_height
+    
+    # Semi-transparent banner
+    overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    banner_color = (255, 107, 107, 220) if "AI" in label else (81, 207, 102, 220)
+    overlay_draw.rectangle([0, banner_y, img.width, img.height], fill=banner_color)
+    
+    # Composite
+    img = img.convert('RGBA')
+    img = Image.alpha_composite(img, overlay)
+    img = img.convert('RGB')
+    
+    draw = ImageDraw.Draw(img)
+    
+    # Add text
+    text = f"{label} • {confidence:.1f}% confidence"
+    # Use default font (works across systems)
+    text_bbox = draw.textbbox((0, 0), text)
+    text_width = text_bbox[2] - text_bbox[0]
+    text_x = (img.width - text_width) // 2
+    text_y = banner_y + (banner_height - 20) // 2
+    draw.text((text_x, text_y), text, fill="white")
+    
+    # Convert to bytes
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def image_to_base64_thumbnail(image: Image.Image, size: tuple = (60, 60)) -> str:
+    """Convert image to base64 thumbnail for history storage"""
+    img = image.copy()
+    img = img.convert("RGB")
+    img.thumbnail(size, Image.Resampling.LANCZOS)
+    buffer = BytesIO()
+    img.save(buffer, format="JPEG", quality=70)
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
+def add_to_history(label: str, confidence: float, is_ai: bool, image: Image.Image = None):
+    """Add prediction to session history with thumbnail"""
+    entry = {
+        "label": label,
+        "confidence": confidence,
+        "is_ai": is_ai,
+        "time": time.strftime("%H:%M:%S"),
+        "thumbnail": image_to_base64_thumbnail(image) if image else None
+    }
+    st.session_state.history.insert(0, entry)
+    # Keep only last 10 items
+    st.session_state.history = st.session_state.history[:10]
+    
+    # Save to localStorage
+    save_history_to_local_storage()
+
+
+def save_history_to_local_storage():
+    """Save history to localStorage using streamlit-javascript"""
+    history_for_storage = []
+    for item in st.session_state.history:
+        history_for_storage.append({
+            "label": item["label"],
+            "confidence": item["confidence"],
+            "is_ai": item["is_ai"],
+            "time": item["time"],
+            "thumbnail": item.get("thumbnail", "")
+        })
+    
+    history_json = json.dumps(history_for_storage)
+    # Escape single quotes for JavaScript
+    history_json_escaped = history_json.replace("'", "\\'")
+    st_javascript(f"localStorage.setItem('ai_classifier_history', '{history_json_escaped}')")
+
+
 # ============== MAIN APP ==============
 
 # Header
@@ -163,11 +421,16 @@ if model_loaded:
     
     with main_col:
         # Tabs for input method
-        tab1, tab2 = st.tabs(["📁 Upload Image", "🔗 From URL"])
+        tab1, tab2, tab3 = st.tabs(["📁 Upload Image", "🔗 From URL", "🖼️ Try Examples"])
         
         image = None
         
         with tab1:
+            st.markdown("""
+            <p style="text-align: center; color: #868e96; margin-bottom: 1rem;">
+                📤 Drag & drop your image here or click to browse
+            </p>
+            """, unsafe_allow_html=True)
             uploaded_file = st.file_uploader(
                 "Drag and drop or click to upload",
                 type=["jpg", "jpeg", "png", "webp"],
@@ -195,6 +458,19 @@ if model_loaded:
                         st.success("✓ Image loaded!")
                 except Exception as e:
                     st.error(f"Failed to load: {e}")
+        
+        with tab3:
+            st.markdown("**Click a sample image to test the classifier:**")
+            sample_cols = st.columns(len(SAMPLE_IMAGES))
+            
+            for idx, (name, sample_url) in enumerate(SAMPLE_IMAGES.items()):
+                with sample_cols[idx]:
+                    if st.button(name, use_container_width=True, key=f"sample_{idx}"):
+                        try:
+                            image = load_image_from_url(sample_url)
+                            st.success(f"✓ Loaded {name}")
+                        except Exception as e:
+                            st.error(f"Failed: {e}")
     
     # Results section
     if image is not None:
@@ -205,6 +481,10 @@ if model_loaded:
             img_array = preprocess_image(image)
             time.sleep(0.5)  # Brief pause for effect
             label, emoji, confidence, raw_score = predict(model, img_array)
+            is_ai = "AI" in label
+            
+            # Add to history with image thumbnail
+            add_to_history(label, confidence, is_ai, image)
         
         # Results in columns
         col1, col2, col3 = st.columns([1, 1, 1])
@@ -216,15 +496,26 @@ if model_loaded:
             # Image info
             w, h = image.size
             st.caption(f"Size: {w} × {h} px")
+            
+            # Download button
+            result_img = create_result_image(image, label, confidence)
+            st.download_button(
+                label="💾 Download Result",
+                data=result_img,
+                file_name=f"ai_detection_result.png",
+                mime="image/png",
+                use_container_width=True
+            )
         
         with col2:
             st.markdown("### 🎯 Prediction")
             
             # Large result display
-            if "AI" in label:
+            if is_ai:
                 st.markdown(f"""
                 <div style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%); 
-                            padding: 2rem; border-radius: 1rem; text-align: center; color: white;">
+                            padding: 2rem; border-radius: 1rem; text-align: center; color: white;
+                            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);">
                     <div style="font-size: 4rem;">{emoji}</div>
                     <div style="font-size: 1.5rem; font-weight: bold;">{label}</div>
                 </div>
@@ -232,7 +523,8 @@ if model_loaded:
             else:
                 st.markdown(f"""
                 <div style="background: linear-gradient(135deg, #51cf66 0%, #40c057 100%); 
-                            padding: 2rem; border-radius: 1rem; text-align: center; color: white;">
+                            padding: 2rem; border-radius: 1rem; text-align: center; color: white;
+                            box-shadow: 0 4px 15px rgba(81, 207, 102, 0.3);">
                     <div style="font-size: 4rem;">{emoji}</div>
                     <div style="font-size: 1.5rem; font-weight: bold;">{label}</div>
                 </div>
@@ -241,15 +533,19 @@ if model_loaded:
         with col3:
             st.markdown("### 📊 Confidence")
             
-            # Confidence gauge
-            st.metric(
-                label="Model Confidence",
-                value=f"{confidence:.1f}%",
-                delta=f"{'High' if confidence > 80 else 'Medium' if confidence > 60 else 'Low'} certainty"
-            )
+            # Animated gauge
+            gauge_svg = create_gauge_svg(confidence, is_ai)
+            st.markdown(gauge_svg, unsafe_allow_html=True)
             
-            # Visual progress
-            st.progress(confidence / 100)
+            # Certainty indicator
+            certainty = "High" if confidence > 80 else "Medium" if confidence > 60 else "Low"
+            cert_color = "#51cf66" if confidence > 80 else "#fcc419" if confidence > 60 else "#ff6b6b"
+            st.markdown(f"""
+            <p style="text-align: center; margin-top: 0.5rem;">
+                <span style="background: {cert_color}; color: white; padding: 0.25rem 0.75rem; 
+                             border-radius: 1rem; font-size: 0.9rem;">{certainty} certainty</span>
+            </p>
+            """, unsafe_allow_html=True)
             
             # Raw score details
             with st.expander("🔬 Technical Details"):
@@ -303,3 +599,53 @@ if model_loaded:
     </div>
     """, unsafe_allow_html=True)
 
+
+# ============== SIDEBAR - History (rendered last for fresh data) ==============
+with st.sidebar:
+    st.markdown("## 📜 Prediction History")
+    
+    if st.session_state.history:
+        for item in st.session_state.history:
+            # Ensure proper types (especially when loaded from localStorage)
+            is_ai = item.get("is_ai", False)
+            confidence = float(item.get("confidence", 0))
+            label = item.get("label", "Unknown")
+            item_time = item.get("time", "")
+            thumbnail = item.get("thumbnail", "")
+            
+            border_color = "#ff6b6b" if is_ai else "#51cf66"
+            emoji = "🤖" if is_ai else "📷"
+            
+            # Build thumbnail HTML if available
+            thumbnail_html = ""
+            if thumbnail:
+                thumbnail_html = f'<img src="data:image/jpeg;base64,{thumbnail}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px; margin-right: 10px; float: left;"/>'
+            
+            st.markdown(f"""
+            <div style="padding: 0.75rem; border-radius: 0.5rem; margin: 0.5rem 0; 
+                        background: #2d2d2d; border-left: 4px solid {border_color}; overflow: hidden;">
+                {thumbnail_html}
+                <div style="overflow: hidden;">
+                    <strong style="color: white;">{emoji} {label}</strong><br>
+                    <small style="color: #aaa;">{confidence:.1f}% • {item_time}</small>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        if st.button("🗑️ Clear History", use_container_width=True):
+            st.session_state.history = []
+            st.session_state.history_loaded = True  # Prevent reloading from localStorage
+            # Clear localStorage too
+            st_javascript("localStorage.removeItem('ai_classifier_history')")
+            st.rerun()
+    else:
+        st.caption("No predictions yet. Upload an image to get started!")
+    
+    st.markdown("---")
+    st.markdown("### 🎯 Quick Stats")
+    if st.session_state.history:
+        ai_count = sum(1 for h in st.session_state.history if h["is_ai"])
+        real_count = len(st.session_state.history) - ai_count
+        col1, col2 = st.columns(2)
+        col1.metric("🤖 AI", ai_count)
+        col2.metric("📷 Real", real_count)
