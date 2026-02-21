@@ -26,6 +26,14 @@ if "history_loaded" not in st.session_state:
     st.session_state.history_loaded = False
 if "load_attempt" not in st.session_state:
     st.session_state.load_attempt = 0
+if "batch_results" not in st.session_state:
+    st.session_state.batch_results = []
+if "feedback_log" not in st.session_state:
+    st.session_state.feedback_log = []
+if "current_prediction_id" not in st.session_state:
+    st.session_state.current_prediction_id = None
+if "feedback_given" not in st.session_state:
+    st.session_state.feedback_given = False
 
 # Load history from localStorage on first run (st_javascript is async)
 if not st.session_state.history_loaded:
@@ -497,6 +505,39 @@ def add_to_history(label: str, confidence: float, is_ai: bool, image: Image.Imag
     save_history_to_local_storage()
 
 
+def save_feedback(prediction_id: str, prediction: str, confidence: float, 
+                  is_correct: bool, thumbnail: str = None):
+    """Save user feedback to session state and file"""
+    feedback_entry = {
+        "id": prediction_id,
+        "prediction": prediction,
+        "confidence": confidence,
+        "is_correct": is_correct,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "thumbnail": thumbnail
+    }
+    st.session_state.feedback_log.append(feedback_entry)
+    
+    # Save to JSON file for persistence
+    feedback_file = "feedback_log.json"
+    try:
+        import os
+        if os.path.exists(feedback_file):
+            with open(feedback_file, "r") as f:
+                existing = json.load(f)
+        else:
+            existing = []
+        
+        # Don't save thumbnail to file (too large)
+        file_entry = {k: v for k, v in feedback_entry.items() if k != "thumbnail"}
+        existing.append(file_entry)
+        
+        with open(feedback_file, "w") as f:
+            json.dump(existing, f, indent=2)
+    except Exception as e:
+        print(f"Error saving feedback: {e}")
+
+
 def save_history_to_local_storage():
     """Save history to localStorage using streamlit-javascript"""
     history_for_storage = []
@@ -541,7 +582,7 @@ if model_loaded:
     
     with main_col:
         # Tabs for input method
-        tab1, tab2, tab3 = st.tabs(["📁 Upload Image", "🔗 From URL", "🖼️ Try Examples"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📁 Upload Image", "🔗 From URL", "🖼️ Try Examples", "📦 Batch Processing"])
         
         image = None
         
@@ -591,6 +632,124 @@ if model_loaded:
                             st.success(f"✓ Loaded {name}")
                         except Exception as e:
                             st.error(f"Failed: {e}")
+        
+        with tab4:
+            st.markdown("""
+            <p style="text-align: center; color: #868e96; margin-bottom: 1rem;">
+                📦 Upload multiple images to analyze them all at once
+            </p>
+            """, unsafe_allow_html=True)
+            
+            batch_files = st.file_uploader(
+                "Upload multiple images",
+                type=["jpg", "jpeg", "png", "webp"],
+                accept_multiple_files=True,
+                help="Select multiple images to process in batch",
+                key="batch_uploader",
+                label_visibility="collapsed"
+            )
+            
+            if batch_files:
+                st.info(f"📁 {len(batch_files)} image(s) selected")
+                
+                col_process, col_clear = st.columns([1, 1])
+                with col_process:
+                    process_batch = st.button("🚀 Analyze All", use_container_width=True, type="primary")
+                with col_clear:
+                    clear_results = st.button("🗑️ Clear Results", use_container_width=True)
+                
+                if clear_results:
+                    st.session_state.batch_results = []
+                    st.rerun()
+                
+                if process_batch:
+                    st.session_state.batch_results = []
+                    progress_bar = st.progress(0, text="Processing images...")
+                    
+                    for idx, file in enumerate(batch_files):
+                        try:
+                            img = Image.open(file)
+                            img_array = preprocess_image(img)
+                            label, emoji, confidence, raw_score = predict(model, img_array)
+                            is_ai = "AI" in label
+                            
+                            st.session_state.batch_results.append({
+                                "filename": file.name,
+                                "prediction": label,
+                                "confidence": round(confidence, 1),
+                                "raw_score": round(raw_score, 4),
+                                "is_ai": is_ai,
+                                "emoji": emoji,
+                                "thumbnail": image_to_base64_thumbnail(img)
+                            })
+                        except Exception as e:
+                            st.session_state.batch_results.append({
+                                "filename": file.name,
+                                "prediction": "Error",
+                                "confidence": 0,
+                                "raw_score": 0,
+                                "is_ai": False,
+                                "emoji": "❌",
+                                "thumbnail": ""
+                            })
+                        
+                        progress_bar.progress((idx + 1) / len(batch_files), 
+                                              text=f"Processing {idx + 1}/{len(batch_files)}...")
+                    
+                    progress_bar.empty()
+                    st.success(f"✅ Processed {len(batch_files)} images!")
+                    st.rerun()
+            
+            # Display batch results
+            if st.session_state.batch_results:
+                st.markdown("### 📊 Batch Results")
+                
+                # Summary stats
+                total = len(st.session_state.batch_results)
+                ai_count = sum(1 for r in st.session_state.batch_results if r["is_ai"])
+                real_count = total - ai_count
+                
+                stat_cols = st.columns(3)
+                stat_cols[0].metric("Total Images", total)
+                stat_cols[1].metric("🤖 AI Generated", ai_count)
+                stat_cols[2].metric("📷 Real Photos", real_count)
+                
+                st.markdown("---")
+                
+                # Results table with thumbnails
+                for result in st.session_state.batch_results:
+                    border_color = "#ff6b6b" if result["is_ai"] else "#51cf66"
+                    
+                    col_thumb, col_info, col_conf = st.columns([1, 3, 2])
+                    
+                    with col_thumb:
+                        if result["thumbnail"]:
+                            st.markdown(f'<img src="data:image/jpeg;base64,{result["thumbnail"]}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 8px; border: 2px solid {border_color};"/>', unsafe_allow_html=True)
+                    
+                    with col_info:
+                        st.markdown(f"**{result['filename']}**")
+                        st.markdown(f"{result['emoji']} {result['prediction']}")
+                    
+                    with col_conf:
+                        st.markdown(f"""<div style="text-align: right;"><span style="background: {border_color}; color: white; padding: 0.25rem 0.75rem; border-radius: 1rem; font-weight: bold;">{result['confidence']}%</span></div>""", unsafe_allow_html=True)
+                    
+                    st.markdown("<hr style='margin: 0.5rem 0; border: none; border-top: 1px solid #3a3a3a;'>", unsafe_allow_html=True)
+                
+                # Export to CSV button
+                st.markdown("### 💾 Export Results")
+                
+                # Create CSV data
+                csv_data = "Filename,Prediction,Confidence (%),Raw Score\n"
+                for r in st.session_state.batch_results:
+                    csv_data += f"{r['filename']},{r['prediction']},{r['confidence']},{r['raw_score']}\n"
+                
+                st.download_button(
+                    label="📥 Download CSV",
+                    data=csv_data,
+                    file_name="batch_predictions.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
     
     # Results section
     if image is not None:
@@ -687,6 +846,44 @@ if model_loaded:
                 real_pct = raw_score * 100
                 st.progress(ai_pct / 100, text=f"AI: {ai_pct:.1f}%")
                 st.progress(real_pct / 100, text=f"Real: {real_pct:.1f}%")
+        
+        # User Feedback Section
+        st.markdown("---")
+        st.markdown("### 💬 Was this prediction correct?")
+        st.markdown("<p style='color: #868e96; font-size: 0.9rem;'>Your feedback helps us improve the model!</p>", unsafe_allow_html=True)
+        
+        # Generate unique prediction ID based on image hash and time
+        prediction_id = f"{hash(image.tobytes()) % 10000}_{int(time.time())}"
+        current_thumbnail = image_to_base64_thumbnail(image)
+        
+        # Store current prediction for feedback
+        if st.session_state.current_prediction_id != prediction_id:
+            st.session_state.current_prediction_id = prediction_id
+            st.session_state.feedback_given = False
+        
+        if not st.session_state.feedback_given:
+            fb_col1, fb_col2, fb_col3 = st.columns([1, 1, 2])
+            
+            with fb_col1:
+                if st.button("👍 Correct", use_container_width=True, type="primary"):
+                    save_feedback(prediction_id, label, confidence, True, current_thumbnail)
+                    st.session_state.feedback_given = True
+                    st.rerun()
+            
+            with fb_col2:
+                if st.button("👎 Wrong", use_container_width=True):
+                    save_feedback(prediction_id, label, confidence, False, current_thumbnail)
+                    st.session_state.feedback_given = True
+                    st.rerun()
+        else:
+            st.success("✅ Thanks for your feedback!")
+            
+            # Show feedback stats
+            if st.session_state.feedback_log:
+                total_fb = len(st.session_state.feedback_log)
+                correct_fb = sum(1 for f in st.session_state.feedback_log if f["is_correct"])
+                accuracy = (correct_fb / total_fb * 100) if total_fb > 0 else 0
+                st.caption(f"📊 Session accuracy: {accuracy:.0f}% ({correct_fb}/{total_fb} correct)")
         
         # Grad-CAM Explainability Section
         if gradcam_overlay is not None:
