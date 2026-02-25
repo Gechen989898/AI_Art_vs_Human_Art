@@ -5,3 +5,4 @@ merged_data/
 .DS_Store
 *.keras
 *.h5
+*.v2
