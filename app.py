@@ -5,301 +5,885 @@ from PIL import Image
 import numpy as np
 import requests
 from io import BytesIO
-import time
+import base64
 
-# Page configuration
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CONFIG
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 st.set_page_config(
-    page_title="AI Art vs Human Art",
-    page_icon="🎨",
-    layout="wide"
+    page_title="Authentic",
+    page_icon="◉",
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-# Custom CSS for better styling
-st.markdown("""
+# Session state
+if "page" not in st.session_state:
+    st.session_state.page = "home"
+if "analyzed_image" not in st.session_state:
+    st.session_state.analyzed_image = None
+if "result" not in st.session_state:
+    st.session_state.result = None
+if "theme" not in st.session_state:
+    st.session_state.theme = "light"
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CSS - Theme aware
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+is_dark = st.session_state.theme == "dark"
+
+# Theme colors
+bg_primary = "#0a0a0a" if is_dark else "#fafafa"
+bg_card = "#171717" if is_dark else "#ffffff"
+bg_hover = "#262626" if is_dark else "#f4f4f5"
+border_color = "#262626" if is_dark else "#e4e4e7"
+text_primary = "#fafafa" if is_dark else "#09090b"
+text_secondary = "#a1a1aa" if is_dark else "#52525b"
+text_muted = "#71717a" if is_dark else "#a1a1aa"
+
+st.markdown(f"""
 <style>
-    /* Main container styling */
-    .main-header {
-        text-align: center;
-        padding: 1rem 0 2rem 0;
-    }
-    
-    /* Result cards */
-    .result-card {
-        padding: 2rem;
-        border-radius: 1rem;
-        text-align: center;
-        margin: 1rem 0;
-    }
-    
-    .ai-result {
-        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
-        color: white;
-    }
-    
-    .human-result {
-        background: linear-gradient(135deg, #51cf66 0%, #40c057 100%);
-        color: white;
-    }
-    
-    /* Stats styling */
-    .stat-box {
-        background: #f8f9fa;
-        border-radius: 0.5rem;
-        padding: 1rem;
-        text-align: center;
-        margin: 0.5rem 0;
-    }
-    
-    .stat-number {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #495057;
-    }
-    
-    .stat-label {
-        color: #868e96;
-        font-size: 0.9rem;
-    }
-    
-    /* Upload area styling */
-    .upload-section {
-        border: 2px dashed #dee2e6;
-        border-radius: 1rem;
-        padding: 2rem;
-        text-align: center;
-        margin: 1rem 0;
-    }
-    
-    /* Footer */
-    .footer {
-        text-align: center;
-        padding: 2rem;
-        color: #868e96;
-        font-size: 0.8rem;
-    }
-    
-    /* Hide Streamlit branding */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    /* Smooth animations */
-    .stProgress > div > div > div > div {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-    }
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* Hide Streamlit chrome */
+#MainMenu, footer, header, .stDeployButton,
+div[data-testid="stToolbar"], div[data-testid="stDecoration"],
+div[data-testid="stStatusWidget"], .stApp > header,
+[data-testid="collapsedControl"], section[data-testid="stSidebar"] {{
+    display: none !important;
+}}
+
+.stApp {{
+    background: {bg_primary} !important;
+    font-family: 'DM Sans', -apple-system, sans-serif !important;
+}}
+
+.main .block-container {{
+    padding: 0 2rem 3rem !important;
+    max-width: 900px !important;
+    margin-top: 0 !important;
+}}
+
+/* Force remove Streamlit's built-in top padding */
+.stApp [data-testid="stAppViewContainer"] {{
+    padding-top: 0 !important;
+}}
+
+.stApp [data-testid="stAppViewBlockContainer"] {{
+    padding-top: 1rem !important;
+}}
+
+.stApp .main {{
+    padding-top: 0 !important;
+}}
+
+.stApp > div:first-child {{
+    padding-top: 0 !important;
+}}
+
+[data-testid="stAppViewContainer"] {{
+    padding-top: 0 !important;
+}}
+
+[data-testid="stVerticalBlock"] {{
+    gap: 0 !important;
+}}
+
+[data-testid="stAppViewContainer"] > section > div {{
+    padding-top: 0 !important;
+}}
+
+/* Remove top spacing */
+.main > div:first-child {{
+    padding-top: 0 !important;
+    margin-top: 0 !important;
+}}
+
+section.main > div {{
+    padding-top: 0 !important;
+}}
+
+/* ═══════════════════════════════════════════
+   NAVBAR
+═══════════════════════════════════════════ */
+.navbar-row {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid {border_color};
+    margin-bottom: 8px;
+}}
+
+.brand {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 18px;
+    color: {text_primary};
+}}
+
+.brand-logo {{
+    width: 28px;
+    height: 28px;
+    background: {text_primary};
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: {bg_primary};
+    font-size: 14px;
+    font-weight: 600;
+}}
+
+/* Button styling */
+.stButton > button {{
+    font-family: 'DM Sans', sans-serif !important;
+    font-weight: 500 !important;
+    border-radius: 8px !important;
+    padding: 8px 16px !important;
+    font-size: 14px !important;
+    transition: all 0.15s !important;
+    height: auto !important;
+    min-height: 36px !important;
+}}
+
+.stButton > button[kind="secondary"],
+.stButton > button:not([kind="primary"]) {{
+    background: transparent !important;
+    color: {text_secondary} !important;
+    border: none !important;
+}}
+
+.stButton > button[kind="secondary"]:hover,
+.stButton > button:not([kind="primary"]):hover {{
+    background: {bg_hover} !important;
+    color: {text_primary} !important;
+}}
+
+.stButton > button[kind="primary"] {{
+    background: {text_primary} !important;
+    color: {bg_primary} !important;
+    border: none !important;
+}}
+
+.stButton > button[kind="primary"]:hover {{
+    background: {text_secondary} !important;
+}}
+
+/* ═══════════════════════════════════════════
+   HERO SECTION
+═══════════════════════════════════════════ */
+.hero {{
+    text-align: center;
+    padding: 32px 0 24px;
+}}
+
+.hero-label {{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: {bg_hover};
+    border: 1px solid {border_color};
+    border-radius: 100px;
+    font-size: 12px;
+    font-weight: 600;
+    color: {text_secondary};
+    margin-bottom: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}}
+
+.hero-title {{
+    font-size: 40px;
+    font-weight: 700;
+    color: {text_primary} !important;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    margin-bottom: 10px;
+}}
+
+.hero h1, .hero-title, h1 {{
+    color: {text_primary} !important;
+    -webkit-text-fill-color: {text_primary} !important;
+}}
+
+.hero-subtitle {{
+    font-size: 16px;
+    color: {text_secondary};
+    max-width: 400px;
+    margin: 0 auto;
+    line-height: 1.6;
+}}
+
+/* ═══════════════════════════════════════════
+   UPLOAD AREA
+═══════════════════════════════════════════ */
+[data-testid="stFileUploader"] > section {{
+    background: {bg_card} !important;
+    border: 2px dashed {border_color} !important;
+    border-radius: 16px !important;
+    padding: 28px !important;
+}}
+
+[data-testid="stFileUploader"] > section:hover {{
+    border-color: {text_muted} !important;
+    background: {bg_hover} !important;
+}}
+
+[data-testid="stFileUploader"] button {{
+    background: {text_primary} !important;
+    color: {bg_primary} !important;
+    border: none !important;
+    border-radius: 8px !important;
+    padding: 10px 20px !important;
+    font-weight: 600 !important;
+    font-family: 'DM Sans', sans-serif !important;
+}}
+
+[data-testid="stFileUploader"] small {{
+    color: {text_muted} !important;
+}}
+
+/* Fix file uploader text contrast */
+[data-testid="stFileUploader"] p,
+[data-testid="stFileUploader"] span,
+[data-testid="stFileUploader"] div {{
+    color: {text_secondary} !important;
+}}
+
+[data-testid="stFileUploader"] section > div:first-child {{
+    color: {text_primary} !important;
+}}
+
+/* Fix all text visibility */
+p, span, div, label {{
+    color: inherit;
+}}
+
+.stMarkdown p {{
+    color: {text_secondary} !important;
+}}
+
+.divider {{
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 18px 0;
+}}
+
+.divider-line {{
+    flex: 1;
+    height: 1px;
+    background: {border_color};
+}}
+
+.divider-text {{
+    font-size: 12px;
+    font-weight: 600;
+    color: {text_muted};
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}}
+
+/* Sample buttons */
+.sample-btn > button {{
+    width: 100% !important;
+    background: {bg_card} !important;
+    border: 1px solid {border_color} !important;
+    color: {text_secondary} !important;
+    border-radius: 12px !important;
+    padding: 14px 20px !important;
+}}
+
+.sample-btn > button:hover {{
+    background: {bg_hover} !important;
+    border-color: {text_muted} !important;
+}}
+
+/* ═══════════════════════════════════════════
+   RESULT CARD
+═══════════════════════════════════════════ */
+.result-card {{
+    background: {bg_card};
+    border: 1px solid {border_color};
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: 0 10px 40px -10px rgba(0,0,0,0.1);
+    margin-top: 16px;
+}}
+
+.result-image-wrap {{
+    position: relative;
+    background: {bg_hover};
+    display: flex;
+    justify-content: center;
+    padding: 20px;
+}}
+
+.result-img {{
+    max-width: 100%;
+    height: auto;
+    max-height: 380px;
+    object-fit: contain;
+    border-radius: 12px;
+}}
+
+.result-badge {{
+    position: absolute;
+    top: 28px;
+    left: 28px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border-radius: 100px;
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}}
+
+.result-badge.ai {{
+    background: #ef4444;
+    color: white;
+}}
+
+.result-badge.real {{
+    background: #22c55e;
+    color: white;
+}}
+
+.result-body {{
+    padding: 24px;
+}}
+
+.result-header {{
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}}
+
+.result-title {{
+    font-size: 24px;
+    font-weight: 700;
+    color: {text_primary};
+    margin-bottom: 4px;
+}}
+
+.result-subtitle {{
+    font-size: 14px;
+    color: {text_muted};
+}}
+
+.confidence-display {{
+    text-align: right;
+}}
+
+.confidence-number {{
+    font-size: 30px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    color: {text_primary};
+    line-height: 1;
+}}
+
+.confidence-label {{
+    font-size: 11px;
+    color: {text_muted};
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}}
+
+.progress-bar {{
+    height: 8px;
+    background: {bg_hover};
+    border-radius: 100px;
+    overflow: hidden;
+    margin-bottom: 20px;
+}}
+
+.progress-fill {{
+    height: 100%;
+    border-radius: 100px;
+}}
+
+.progress-fill.ai {{
+    background: linear-gradient(90deg, #ef4444, #f97316);
+}}
+
+.progress-fill.real {{
+    background: linear-gradient(90deg, #22c55e, #10b981);
+}}
+
+.stats-row {{
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}}
+
+.stat-box {{
+    background: {bg_hover};
+    border-radius: 12px;
+    padding: 14px;
+    text-align: center;
+}}
+
+.stat-value {{
+    font-size: 16px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    color: {text_primary};
+}}
+
+.stat-label {{
+    font-size: 10px;
+    color: {text_muted};
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}}
+
+/* ═══════════════════════════════════════════
+   ABOUT PAGE
+═══════════════════════════════════════════ */
+.about-section {{
+    padding: 24px 0;
+}}
+
+.about-header {{
+    text-align: center;
+    margin-bottom: 32px;
+}}
+
+.about-title {{
+    font-size: 30px;
+    font-weight: 700;
+    color: {text_primary};
+    margin-bottom: 8px;
+}}
+
+.about-desc {{
+    font-size: 15px;
+    color: {text_secondary};
+    line-height: 1.7;
+}}
+
+.feature-card {{
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 20px;
+    background: {bg_card};
+    border: 1px solid {border_color};
+    border-radius: 14px;
+    margin-bottom: 10px;
+}}
+
+.feature-icon {{
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    background: {bg_hover};
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+}}
+
+.feature-content h3 {{
+    font-size: 15px;
+    font-weight: 600;
+    color: {text_primary};
+    margin: 0 0 4px 0;
+}}
+
+.feature-content p {{
+    font-size: 13px;
+    color: {text_secondary};
+    margin: 0;
+    line-height: 1.5;
+}}
+
+.tech-section {{
+    background: {bg_card};
+    border: 1px solid {border_color};
+    border-radius: 14px;
+    padding: 24px;
+    margin-top: 20px;
+}}
+
+.tech-title {{
+    font-size: 15px;
+    font-weight: 600;
+    color: {text_primary};
+    margin-bottom: 14px;
+}}
+
+.tech-tags {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}}
+
+.tech-tag {{
+    padding: 7px 12px;
+    background: {bg_hover};
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: {text_secondary};
+}}
+
+/* History Section */
+.history-section {{
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid {border_color};
+}}
+
+.history-title {{
+    font-size: 14px;
+    font-weight: 600;
+    color: {text_secondary};
+    margin-bottom: 16px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}}
+
+.history-grid {{
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}}
+
+.history-item {{
+    background: {bg_card};
+    border: 1px solid {border_color};
+    border-radius: 12px;
+    padding: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}}
+
+.history-thumb {{
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    object-fit: cover;
+    flex-shrink: 0;
+}}
+
+.history-info {{
+    flex: 1;
+    min-width: 0;
+}}
+
+.history-label {{
+    font-size: 12px;
+    font-weight: 600;
+    color: {text_primary};
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}}
+
+.history-label.ai {{ color: #ef4444; }}
+.history-label.real {{ color: #22c55e; }}
+
+.history-conf {{
+    font-size: 11px;
+    color: {text_muted};
+    font-family: 'JetBrains Mono', monospace;
+}}
+
+/* Responsive */
+@media (max-width: 768px) {{
+    .main .block-container {{
+        padding: 1rem !important;
+    }}
+    .hero-title {{
+        font-size: 28px;
+    }}
+    .stats-row {{
+        grid-template-columns: 1fr;
+    }}
+}}
 </style>
 """, unsafe_allow_html=True)
 
-# Constants
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# HELPERS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 IMG_SIZE = (128, 128)
-MODEL_PATH = "basic_cnn.keras"
+MODEL_PATH = "models/basic_cnn.keras"
 
+SAMPLES = [
+    {"name": "Mountain", "icon": "🏔", "url": "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=400"},
+    {"name": "Dog", "icon": "🐕", "url": "https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400"},
+    {"name": "Flower", "icon": "🌷", "url": "https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=400"},
+]
 
 @st.cache_resource
 def load_model():
-    """Load the trained model (cached to avoid reloading)"""
-    model = keras.models.load_model(MODEL_PATH)
-    return model
+    return keras.models.load_model(MODEL_PATH)
 
-
-def preprocess_image(image: Image.Image) -> np.ndarray:
-    """Preprocess image for model prediction"""
+def preprocess(image):
     if image.mode != "RGB":
         image = image.convert("RGB")
     image = image.resize(IMG_SIZE)
-    img_array = np.array(image)
-    img_array = img_array.reshape((1, 128, 128, 3))
-    img_array = img_array / 255.0
-    return img_array
+    return np.array(image).reshape((1, 128, 128, 3)) / 255.0
 
-
-def predict(model, img_array: np.ndarray) -> tuple[str, str, float, float]:
-    """Run prediction and return result with confidence"""
-    prediction = model.predict(img_array, verbose=0)
-    score = float(prediction[0][0])
-    
+def predict(model, img_array):
+    pred = model.predict(img_array, verbose=0)
+    score = float(pred[0][0])
     if score < 0.5:
-        label = "AI Generated"
-        emoji = "🤖"
-        confidence = (1 - score) * 100
-    else:
-        label = "Real Photo"
-        emoji = "📷"
-        confidence = score * 100
-    
-    return label, emoji, confidence, score
+        return {"label": "AI Generated", "is_ai": True, "confidence": (1 - score) * 100, "raw": score}
+    return {"label": "Real Image", "is_ai": False, "confidence": score * 100, "raw": score}
 
+def load_url(url):
+    resp = requests.get(url, timeout=10)
+    resp.raise_for_status()
+    return Image.open(BytesIO(resp.content))
 
-def load_image_from_url(url: str) -> Image.Image:
-    """Load image from URL"""
-    response = requests.get(url, timeout=10)
-    response.raise_for_status()
-    image = Image.open(BytesIO(response.content))
-    return image
+def img_to_b64(image, max_size=800):
+    img = image.copy().convert("RGB")
+    img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    return base64.b64encode(buf.getvalue()).decode()
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# NAVBAR - Using st.columns for real buttons
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+col1, col2, col3, col4, col5 = st.columns([3, 4, 1, 1, 0.5])
 
-# ============== MAIN APP ==============
+with col1:
+    st.markdown('<div class="brand"><div class="brand-logo">A</div>Authentic</div>', unsafe_allow_html=True)
 
-# Header
-st.markdown("""
-<div class="main-header">
-    <h1>🎨 AI vs Real Image Classifier</h1>
-    <p style="font-size: 1.2rem; color: #868e96;">
-        Detect whether an image was generated by AI or is a real photograph
-    </p>
-</div>
-""", unsafe_allow_html=True)
+with col3:
+    if st.button("Detect", key="nav_detect", type="primary" if st.session_state.page == "home" else "secondary"):
+        st.session_state.page = "home"
+        st.session_state.analyzed_image = None
+        st.session_state.result = None
+        st.rerun()
+
+with col4:
+    if st.button("About", key="nav_about", type="primary" if st.session_state.page == "about" else "secondary"):
+        st.session_state.page = "about"
+        st.rerun()
+
+with col5:
+    theme_icon = "🌙" if st.session_state.theme == "light" else "☀️"
+    if st.button(theme_icon, key="theme_toggle"):
+        st.session_state.theme = "dark" if st.session_state.theme == "light" else "light"
+        st.rerun()
+
+st.markdown(f'<hr style="margin: 8px 0 16px; border: none; border-top: 1px solid {border_color};">', unsafe_allow_html=True)
 
 # Load model
 try:
     model = load_model()
-    model_loaded = True
-except Exception as e:
-    st.error(f"❌ Failed to load model: {e}")
-    model_loaded = False
+except:
+    st.error("Model failed to load")
+    st.stop()
 
-if model_loaded:
-    # Create three columns for layout
-    left_spacer, main_col, right_spacer = st.columns([1, 3, 1])
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# HOME PAGE
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+if st.session_state.page == "home":
     
-    with main_col:
-        # Tabs for input method
-        tab1, tab2 = st.tabs(["📁 Upload Image", "🔗 From URL"])
+    # Show result if we have one
+    if st.session_state.analyzed_image and st.session_state.result:
+        img = st.session_state.analyzed_image
+        res = st.session_state.result
+        b64 = img_to_b64(img)
+        badge_class = "ai" if res["is_ai"] else "real"
         
-        image = None
+        # Back button
+        if st.button("← Analyze another image"):
+            st.session_state.analyzed_image = None
+            st.session_state.result = None
+            st.rerun()
         
-        with tab1:
-            uploaded_file = st.file_uploader(
-                "Drag and drop or click to upload",
-                type=["jpg", "jpeg", "png", "webp"],
-                help="Supported formats: JPG, JPEG, PNG, WEBP",
-                label_visibility="collapsed"
-            )
-            if uploaded_file is not None:
-                image = Image.open(uploaded_file)
-        
-        with tab2:
-            col_url, col_btn = st.columns([4, 1])
-            with col_url:
-                url = st.text_input(
-                    "Image URL",
-                    placeholder="https://example.com/image.jpg",
-                    label_visibility="collapsed"
-                )
-            with col_btn:
-                load_btn = st.button("Load", use_container_width=True, type="primary")
-            
-            if url and load_btn:
-                try:
-                    with st.spinner("Loading image..."):
-                        image = load_image_from_url(url)
-                        st.success("✓ Image loaded!")
-                except Exception as e:
-                    st.error(f"Failed to load: {e}")
+        st.markdown(f"""
+        <div class="result-card">
+            <div class="result-image-wrap">
+                <img src="data:image/jpeg;base64,{b64}" class="result-img"/>
+                <div class="result-badge {badge_class}">
+                    {"🤖" if res["is_ai"] else "📷"} {res["label"]}
+                </div>
+            </div>
+            <div class="result-body">
+                <div class="result-header">
+                    <div>
+                        <div class="result-title">{"AI Generated" if res["is_ai"] else "Real Photograph"}</div>
+                        <div class="result-subtitle">Analysis completed</div>
+                    </div>
+                    <div class="confidence-display">
+                        <div class="confidence-number">{res["confidence"]:.1f}%</div>
+                        <div class="confidence-label">Confidence</div>
+                    </div>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill {badge_class}" style="width: {res['confidence']}%;"></div>
+                </div>
+                <div class="stats-row">
+                    <div class="stat-box">
+                        <div class="stat-value">{res["raw"]:.4f}</div>
+                        <div class="stat-label">Raw Score</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">{img.size[0]}×{img.size[1]}</div>
+                        <div class="stat-label">Dimensions</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">{"High" if res["confidence"] > 80 else "Medium" if res["confidence"] > 60 else "Low"}</div>
+                        <div class="stat-label">Certainty</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    # Results section
-    if image is not None:
-        st.markdown("---")
+    # Show upload form
+    else:
+        st.markdown("""
+        <div class="hero">
+            <div class="hero-label">◉ AI Detection</div>
+            <h1 class="hero-title">Real or AI?</h1>
+            <p class="hero-subtitle">Upload an image and know instantly if it was created by AI or captured with a camera.</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        # Analyze with animation
-        with st.spinner("🔍 Analyzing image..."):
-            img_array = preprocess_image(image)
-            time.sleep(0.5)  # Brief pause for effect
-            label, emoji, confidence, raw_score = predict(model, img_array)
+        uploaded = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png", "webp"], label_visibility="collapsed")
         
-        # Results in columns
-        col1, col2, col3 = st.columns([1, 1, 1])
+        if uploaded:
+            img = Image.open(uploaded)
+            with st.spinner("Analyzing..."):
+                arr = preprocess(img)
+                res = predict(model, arr)
+            st.session_state.analyzed_image = img
+            st.session_state.result = res
+            # Add to history
+            thumb = img.copy()
+            thumb.thumbnail((80, 80), Image.Resampling.LANCZOS)
+            st.session_state.history.insert(0, {
+                "thumb": img_to_b64(thumb, 80),
+                "label": res["label"],
+                "is_ai": res["is_ai"],
+                "confidence": res["confidence"]
+            })
+            st.session_state.history = st.session_state.history[:8]  # Keep last 8
+            st.rerun()
         
-        with col1:
-            st.markdown("### 📷 Input Image")
-            st.image(image, use_container_width=True)
-            
-            # Image info
-            w, h = image.size
-            st.caption(f"Size: {w} × {h} px")
+        st.markdown("""
+        <div class="divider">
+            <div class="divider-line"></div>
+            <span class="divider-text">or try a sample</span>
+            <div class="divider-line"></div>
+        </div>
+        """, unsafe_allow_html=True)
         
-        with col2:
-            st.markdown("### 🎯 Prediction")
-            
-            # Large result display
-            if "AI" in label:
-                st.markdown(f"""
-                <div style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%); 
-                            padding: 2rem; border-radius: 1rem; text-align: center; color: white;">
-                    <div style="font-size: 4rem;">{emoji}</div>
-                    <div style="font-size: 1.5rem; font-weight: bold;">{label}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div style="background: linear-gradient(135deg, #51cf66 0%, #40c057 100%); 
-                            padding: 2rem; border-radius: 1rem; text-align: center; color: white;">
-                    <div style="font-size: 4rem;">{emoji}</div>
-                    <div style="font-size: 1.5rem; font-weight: bold;">{label}</div>
-                </div>
-                """, unsafe_allow_html=True)
+        cols = st.columns(3)
+        for i, sample in enumerate(SAMPLES):
+            with cols[i]:
+                st.markdown('<div class="sample-btn">', unsafe_allow_html=True)
+                if st.button(f"{sample['icon']} {sample['name']}", key=f"sample_{i}", use_container_width=True):
+                    try:
+                        img = load_url(sample['url'])
+                        arr = preprocess(img)
+                        res = predict(model, arr)
+                        st.session_state.analyzed_image = img
+                        st.session_state.result = res
+                        # Add to history
+                        thumb = img.copy()
+                        thumb.thumbnail((80, 80), Image.Resampling.LANCZOS)
+                        st.session_state.history.insert(0, {
+                            "thumb": img_to_b64(thumb, 80),
+                            "label": res["label"],
+                            "is_ai": res["is_ai"],
+                            "confidence": res["confidence"]
+                        })
+                        st.session_state.history = st.session_state.history[:8]
+                        st.rerun()
+                    except Exception as e:
+                        st.error("Failed to load sample")
+                st.markdown('</div>', unsafe_allow_html=True)
         
-        with col3:
-            st.markdown("### 📊 Confidence")
+        # History section
+        if st.session_state.history:
+            items_html = ""
+            for item in st.session_state.history:
+                label_class = "ai" if item["is_ai"] else "real"
+                icon = "🤖" if item["is_ai"] else "📷"
+                items_html += f'<div class="history-item"><img src="data:image/jpeg;base64,{item["thumb"]}" class="history-thumb"/><div class="history-info"><div class="history-label {label_class}">{icon} {item["label"]}</div><div class="history-conf">{item["confidence"]:.1f}%</div></div></div>'
             
-            # Confidence gauge
-            st.metric(
-                label="Model Confidence",
-                value=f"{confidence:.1f}%",
-                delta=f"{'High' if confidence > 80 else 'Medium' if confidence > 60 else 'Low'} certainty"
-            )
-            
-            # Visual progress
-            st.progress(confidence / 100)
-            
-            # Raw score details
-            with st.expander("🔬 Technical Details"):
-                st.markdown(f"""
-                - **Raw Score:** `{raw_score:.4f}`
-                - **Threshold:** `0.5`
-                - **Distance from threshold:** `{abs(raw_score - 0.5):.4f}`
-                """)
-                
-                # Mini bar chart
-                st.markdown("**Score Distribution:**")
-                ai_pct = (1 - raw_score) * 100
-                real_pct = raw_score * 100
-                st.progress(ai_pct / 100, text=f"AI: {ai_pct:.1f}%")
-                st.progress(real_pct / 100, text=f"Real: {real_pct:.1f}%")
+            st.markdown(f'<div class="history-section"><div class="history-title">Recent Analyses</div><div class="history-grid">{items_html}</div></div>', unsafe_allow_html=True)
 
-    # Footer section
-    st.markdown("---")
-    
-    col_info1, col_info2 = st.columns(2)
-    
-    with col_info1:
-        with st.expander("ℹ️ About This Model"):
-            st.markdown("""
-            This classifier uses a **Convolutional Neural Network (CNN)** trained on the 
-            [Tiny GenImage](https://www.kaggle.com/datasets/yangsangtai/tiny-genimage) dataset.
-            
-            **AI Generators in training data:**
-            - BigGAN, VQDM, Stable Diffusion v5
-            - Wukong, ADM, Glide, Midjourney
-            
-            **Architecture:** 4 Conv2D layers → Dense → Sigmoid
-            """)
-    
-    with col_info2:
-        with st.expander("⚠️ Limitations"):
-            st.markdown("""
-            **Current model limitations:**
-            - Trained on **nature/outdoor images** as the "real" class
-            - May misclassify portraits, indoor photos, or artwork
-            - Best accuracy with landscape & nature photography
-            
-            *Future versions: transfer learning + multi-class AI model detection*
-            """)
-    
-    # Footer
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ABOUT PAGE
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+elif st.session_state.page == "about":
     st.markdown("""
-    <div class="footer">
-        <p>Built with ❤️ by the AI Art Detection Team | 
-        <a href="https://github.com/Gechen989898/AI_Art_vs_Human_Art">GitHub</a></p>
+    <div class="about-section">
+        <div class="about-header">
+            <h1 class="about-title">About Authentic</h1>
+            <p class="about-desc">A neural network that detects AI-generated images with high accuracy.</p>
+        </div>
     </div>
     """, unsafe_allow_html=True)
-
+    
+    # Feature 1
+    st.markdown("""
+    <div class="feature-card">
+        <div class="feature-icon">🧠</div>
+        <div class="feature-content">
+            <h3>Convolutional Neural Network</h3>
+            <p>Trained on the GenImage dataset containing images from Midjourney, Stable Diffusion, DALL-E, and more.</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Feature 2
+    st.markdown("""
+    <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <div class="feature-content">
+            <h3>Instant Detection</h3>
+            <p>Get results in milliseconds. Simply upload an image and receive a confidence score.</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Feature 3
+    st.markdown("""
+    <div class="feature-card">
+        <div class="feature-icon">🔒</div>
+        <div class="feature-content">
+            <h3>Privacy First</h3>
+            <p>Images are processed locally. Nothing is stored or sent to external servers.</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Tech stack
+    st.markdown("""
+    <div class="tech-section">
+        <div class="tech-title">Built with</div>
+        <div class="tech-tags">
+            <span class="tech-tag">Python</span>
+            <span class="tech-tag">TensorFlow</span>
+            <span class="tech-tag">Keras</span>
+            <span class="tech-tag">Streamlit</span>
+            <span class="tech-tag">CNN Architecture</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
