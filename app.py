@@ -839,19 +839,9 @@ if st.session_state.page == "home":
             # Build the probability bars HTML
             probs_html = ""
             for label, prob in sorted_probs:
-                probs_html += f'''
-                <div style="margin-bottom: 8px;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                        <span style="font-size: 13px; color: {text_secondary}; text-transform: capitalize;">{label}</span>
-                        <span style="font-size: 13px; font-weight: 600; color: {text_primary};">{prob:.1f}%</span>
-                    </div>
-                    <div style="height: 8px; background: {bg_hover}; border-radius: 4px; overflow: hidden;">
-                        <div style="height: 100%; width: {prob}%; background: linear-gradient(90deg, #f43f5e, #ec4899); border-radius: 4px;"></div>
-                    </div>
-                </div>
-                '''
+                probs_html += f'<div style="margin-bottom: 8px;"><div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="font-size: 13px; color: {text_secondary}; text-transform: capitalize;">{label}</span><span style="font-size: 13px; font-weight: 600; color: {text_primary};">{prob:.1f}%</span></div><div style="height: 8px; background: {bg_hover}; border-radius: 4px; overflow: hidden;"><div style="height: 100%; width: {prob}%; background: linear-gradient(90deg, #f43f5e, #ec4899); border-radius: 4px;"></div></div></div>'
             
-            st.markdown(f"""
+            full_html = f"""
             <div class="result-card">
                 <div class="result-image-wrap">
                     <img src="data:image/jpeg;base64,{b64}" class="result-img"/>
@@ -872,7 +862,7 @@ if st.session_state.page == "home":
                     </div>
                     <div style="margin-top: 16px;">
                         <div style="font-size: 12px; font-weight: 600; color: {text_muted}; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">All Generators Probability</div>
-                        {probs_html}
+                        """ + probs_html + f"""
                     </div>
                     <div class="stats-row">
                         <div class="stat-box">
@@ -890,7 +880,8 @@ if st.session_state.page == "home":
                     </div>
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+            """
+            st.markdown(full_html, unsafe_allow_html=True)
         else:
             # Binary result display
             st.markdown(f"""
