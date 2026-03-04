@@ -6,6 +6,9 @@ import numpy as np
 import requests
 from io import BytesIO
 import base64
+import torch
+from transformers import ViTForImageClassification, AutoImageProcessor
+from torchvision import transforms
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONFIG
@@ -28,6 +31,8 @@ if "theme" not in st.session_state:
     st.session_state.theme = "light"
 if "history" not in st.session_state:
     st.session_state.history = []
+if "model_type" not in st.session_state:
+    st.session_state.model_type = "binary"  # "binary" or "multiclass"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CSS - Theme aware
@@ -624,6 +629,15 @@ p, span, div, label {{
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 IMG_SIZE = (128, 128)
 MODEL_PATH = "models/basic_cnn.keras"
+VIT_IMG_SIZE = 224
+
+# ViT Model configurations
+BINARY_MODEL_NAME = "gechen98/AI_image_classification"
+MULTICLASS_MODEL_NAME = "gechen98/AI_image_generator_classification"
+VIT_BASE_MODEL = "google/vit-base-patch16-224"
+
+# Multiclass labels
+MULTICLASS_LABELS = ['glide', 'midjourney', 'wukong', 'adm', 'sdv5', 'vqdm', 'biggan']
 
 SAMPLES = [
     {"name": "Mountain", "icon": "🏔", "url": "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=400"},
@@ -631,9 +645,43 @@ SAMPLES = [
     {"name": "Flower", "icon": "🌷", "url": "https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=400"},
 ]
 
+# Device for PyTorch
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 @st.cache_resource
 def load_model():
     return keras.models.load_model(MODEL_PATH)
+
+@st.cache_resource
+def load_vit_binary_model():
+    """Load the binary classification ViT model from Hugging Face"""
+    model = ViTForImageClassification.from_pretrained(BINARY_MODEL_NAME)
+    model.to(DEVICE)
+    model.eval()
+    return model
+
+@st.cache_resource
+def load_vit_multiclass_model():
+    """Load the multiclass classification ViT model from Hugging Face"""
+    model = ViTForImageClassification.from_pretrained(MULTICLASS_MODEL_NAME)
+    model.to(DEVICE)
+    model.eval()
+    return model
+
+@st.cache_resource
+def load_vit_processor():
+    """Load the ViT image processor"""
+    return AutoImageProcessor.from_pretrained(VIT_BASE_MODEL)
+
+def get_vit_transforms(processor):
+    """Get transforms for ViT models"""
+    mean = processor.image_mean
+    std = processor.image_std
+    return transforms.Compose([
+        transforms.Resize((VIT_IMG_SIZE, VIT_IMG_SIZE)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std),
+    ])
 
 def preprocess(image):
     if image.mode != "RGB":
@@ -641,12 +689,71 @@ def preprocess(image):
     image = image.resize(IMG_SIZE)
     return np.array(image).reshape((1, 128, 128, 3)) / 255.0
 
+def preprocess_vit(image, transform):
+    """Preprocess image for ViT model"""
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    tensor = transform(image).unsqueeze(0).to(DEVICE)
+    return tensor
+
 def predict(model, img_array):
     pred = model.predict(img_array, verbose=0)
     score = float(pred[0][0])
     if score < 0.5:
         return {"label": "AI Generated", "is_ai": True, "confidence": (1 - score) * 100, "raw": score}
     return {"label": "Real Image", "is_ai": False, "confidence": score * 100, "raw": score}
+
+def predict_vit_binary(model, image_tensor):
+    """Predict using binary ViT model"""
+    with torch.no_grad():
+        outputs = model(pixel_values=image_tensor)
+        probs = torch.softmax(outputs.logits, dim=1)[0]
+        pred_id = int(probs.argmax().item())
+        confidence = float(probs[pred_id].item()) * 100
+        
+        # id2label: {0: 'ai', 1: 'nature'}
+        is_ai = pred_id == 0
+        label = "AI Generated" if is_ai else "Real Image"
+        
+        return {
+            "label": label,
+            "is_ai": is_ai,
+            "confidence": confidence,
+            "raw": float(probs[0].item()),  # AI probability
+            "probs": probs.cpu().numpy()
+        }
+
+def predict_vit_multiclass(model, image_tensor):
+    """Predict using multiclass ViT model to identify AI generator type"""
+    with torch.no_grad():
+        outputs = model(pixel_values=image_tensor)
+        probs = torch.softmax(outputs.logits, dim=1)[0]
+        pred_id = int(probs.argmax().item())
+        confidence = float(probs[pred_id].item()) * 100
+        
+        # Get label from model config or use our list
+        if hasattr(model.config, 'id2label') and model.config.id2label:
+            pred_label = model.config.id2label[pred_id]
+        else:
+            pred_label = MULTICLASS_LABELS[pred_id]
+        
+        # Build all class probabilities
+        all_probs = {}
+        for i, prob in enumerate(probs.cpu().numpy()):
+            if hasattr(model.config, 'id2label') and model.config.id2label:
+                label = model.config.id2label[i]
+            else:
+                label = MULTICLASS_LABELS[i]
+            all_probs[label] = float(prob) * 100
+        
+        return {
+            "label": pred_label,
+            "is_ai": True,  # All multiclass predictions are AI generators
+            "confidence": confidence,
+            "raw": float(probs[pred_id].item()),
+            "all_probs": all_probs,
+            "pred_id": pred_id
+        }
 
 def load_url(url):
     resp = requests.get(url, timeout=10)
@@ -688,11 +795,20 @@ with col5:
 
 st.markdown(f'<hr style="margin: 8px 0 16px; border: none; border-top: 1px solid {border_color};">', unsafe_allow_html=True)
 
-# Load model
+# Load models
 try:
-    model = load_model()
+    model = load_model()  # Legacy CNN model
 except:
-    st.error("Model failed to load")
+    model = None
+
+# Load ViT models and processor
+try:
+    vit_processor = load_vit_processor()
+    vit_transform = get_vit_transforms(vit_processor)
+    vit_binary_model = load_vit_binary_model()
+    vit_multiclass_model = load_vit_multiclass_model()
+except Exception as e:
+    st.error(f"ViT models failed to load: {e}")
     st.stop()
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -713,45 +829,109 @@ if st.session_state.page == "home":
             st.session_state.result = None
             st.rerun()
         
-        st.markdown(f"""
-        <div class="result-card">
-            <div class="result-image-wrap">
-                <img src="data:image/jpeg;base64,{b64}" class="result-img"/>
-                <div class="result-badge {badge_class}">
-                    {"🤖" if res["is_ai"] else "📷"} {res["label"]}
+        # Check if this is a multiclass result
+        is_multiclass = "all_probs" in res
+        
+        if is_multiclass:
+            # Multiclass result display - shows AI generator type
+            sorted_probs = sorted(res["all_probs"].items(), key=lambda x: x[1], reverse=True)
+            
+            # Build the probability bars HTML
+            probs_html = ""
+            for label, prob in sorted_probs:
+                probs_html += f'''
+                <div style="margin-bottom: 8px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="font-size: 13px; color: {text_secondary}; text-transform: capitalize;">{label}</span>
+                        <span style="font-size: 13px; font-weight: 600; color: {text_primary};">{prob:.1f}%</span>
+                    </div>
+                    <div style="height: 8px; background: {bg_hover}; border-radius: 4px; overflow: hidden;">
+                        <div style="height: 100%; width: {prob}%; background: linear-gradient(90deg, #f43f5e, #ec4899); border-radius: 4px;"></div>
+                    </div>
+                </div>
+                '''
+            
+            st.markdown(f"""
+            <div class="result-card">
+                <div class="result-image-wrap">
+                    <img src="data:image/jpeg;base64,{b64}" class="result-img"/>
+                    <div class="result-badge ai">
+                        🎨 {res["label"].upper()}
+                    </div>
+                </div>
+                <div class="result-body">
+                    <div class="result-header">
+                        <div>
+                            <div class="result-title">AI Generator Identified</div>
+                            <div class="result-subtitle">Detected: <strong style="text-transform: capitalize;">{res["label"]}</strong></div>
+                        </div>
+                        <div class="confidence-display">
+                            <div class="confidence-number">{res["confidence"]:.1f}%</div>
+                            <div class="confidence-label">Confidence</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 16px;">
+                        <div style="font-size: 12px; font-weight: 600; color: {text_muted}; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">All Generators Probability</div>
+                        {probs_html}
+                    </div>
+                    <div class="stats-row">
+                        <div class="stat-box">
+                            <div class="stat-value">{res["raw"]:.4f}</div>
+                            <div class="stat-label">Raw Score</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{img.size[0]}×{img.size[1]}</div>
+                            <div class="stat-label">Dimensions</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{"High" if res["confidence"] > 80 else "Medium" if res["confidence"] > 60 else "Low"}</div>
+                            <div class="stat-label">Certainty</div>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="result-body">
-                <div class="result-header">
-                    <div>
-                        <div class="result-title">{"AI Generated" if res["is_ai"] else "Real Photograph"}</div>
-                        <div class="result-subtitle">Analysis completed</div>
-                    </div>
-                    <div class="confidence-display">
-                        <div class="confidence-number">{res["confidence"]:.1f}%</div>
-                        <div class="confidence-label">Confidence</div>
+            """, unsafe_allow_html=True)
+        else:
+            # Binary result display
+            st.markdown(f"""
+            <div class="result-card">
+                <div class="result-image-wrap">
+                    <img src="data:image/jpeg;base64,{b64}" class="result-img"/>
+                    <div class="result-badge {badge_class}">
+                        {"🤖" if res["is_ai"] else "📷"} {res["label"]}
                     </div>
                 </div>
-                <div class="progress-bar">
-                    <div class="progress-fill {badge_class}" style="width: {res['confidence']}%;"></div>
-                </div>
-                <div class="stats-row">
-                    <div class="stat-box">
-                        <div class="stat-value">{res["raw"]:.4f}</div>
-                        <div class="stat-label">Raw Score</div>
+                <div class="result-body">
+                    <div class="result-header">
+                        <div>
+                            <div class="result-title">{"AI Generated" if res["is_ai"] else "Real Photograph"}</div>
+                            <div class="result-subtitle">Analysis completed</div>
+                        </div>
+                        <div class="confidence-display">
+                            <div class="confidence-number">{res["confidence"]:.1f}%</div>
+                            <div class="confidence-label">Confidence</div>
+                        </div>
                     </div>
-                    <div class="stat-box">
-                        <div class="stat-value">{img.size[0]}×{img.size[1]}</div>
-                        <div class="stat-label">Dimensions</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill {badge_class}" style="width: {res['confidence']}%;"></div>
                     </div>
-                    <div class="stat-box">
-                        <div class="stat-value">{"High" if res["confidence"] > 80 else "Medium" if res["confidence"] > 60 else "Low"}</div>
-                        <div class="stat-label">Certainty</div>
+                    <div class="stats-row">
+                        <div class="stat-box">
+                            <div class="stat-value">{res["raw"]:.4f}</div>
+                            <div class="stat-label">Raw Score</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{img.size[0]}×{img.size[1]}</div>
+                            <div class="stat-label">Dimensions</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{"High" if res["confidence"] > 80 else "Medium" if res["confidence"] > 60 else "Low"}</div>
+                            <div class="stat-label">Certainty</div>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
     
     # Show upload form
     else:
@@ -763,13 +943,53 @@ if st.session_state.page == "home":
         </div>
         """, unsafe_allow_html=True)
         
+        # Model selector
+        st.markdown(f"""
+        <div style="text-align: center; margin-bottom: 20px;">
+            <div style="font-size: 12px; font-weight: 600; color: {text_muted}; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Select Detection Mode</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col_mode1, col_mode2 = st.columns(2)
+        with col_mode1:
+            if st.button(
+                "🔍 AI vs Real", 
+                key="mode_binary",
+                type="primary" if st.session_state.model_type == "binary" else "secondary",
+                use_container_width=True,
+                help="Detect if an image is AI-generated or real"
+            ):
+                st.session_state.model_type = "binary"
+                st.rerun()
+        
+        with col_mode2:
+            if st.button(
+                "🎨 Identify Generator", 
+                key="mode_multiclass",
+                type="primary" if st.session_state.model_type == "multiclass" else "secondary",
+                use_container_width=True,
+                help="Identify which AI generator created the image"
+            ):
+                st.session_state.model_type = "multiclass"
+                st.rerun()
+        
+        # Show mode description
+        if st.session_state.model_type == "binary":
+            st.markdown(f'<p style="text-align: center; font-size: 13px; color: {text_muted}; margin: 12px 0 20px;">Classifies images as AI-generated or real photographs</p>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<p style="text-align: center; font-size: 13px; color: {text_muted}; margin: 12px 0 20px;">Identifies the AI generator: Midjourney, Stable Diffusion, GLIDE, and more</p>', unsafe_allow_html=True)
+        
         uploaded = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png", "webp"], label_visibility="collapsed")
         
         if uploaded:
             img = Image.open(uploaded)
             with st.spinner("Analyzing..."):
-                arr = preprocess(img)
-                res = predict(model, arr)
+                # Use ViT models based on selection
+                tensor = preprocess_vit(img, vit_transform)
+                if st.session_state.model_type == "binary":
+                    res = predict_vit_binary(vit_binary_model, tensor)
+                else:
+                    res = predict_vit_multiclass(vit_multiclass_model, tensor)
             st.session_state.analyzed_image = img
             st.session_state.result = res
             # Add to history
@@ -799,8 +1019,12 @@ if st.session_state.page == "home":
                 if st.button(f"{sample['icon']} {sample['name']}", key=f"sample_{i}", use_container_width=True):
                     try:
                         img = load_url(sample['url'])
-                        arr = preprocess(img)
-                        res = predict(model, arr)
+                        # Use ViT models based on selection
+                        tensor = preprocess_vit(img, vit_transform)
+                        if st.session_state.model_type == "binary":
+                            res = predict_vit_binary(vit_binary_model, tensor)
+                        else:
+                            res = predict_vit_multiclass(vit_multiclass_model, tensor)
                         st.session_state.analyzed_image = img
                         st.session_state.result = res
                         # Add to history
@@ -836,7 +1060,7 @@ elif st.session_state.page == "about":
     <div class="about-section">
         <div class="about-header">
             <h1 class="about-title">About Authentic</h1>
-            <p class="about-desc">A neural network that detects AI-generated images with high accuracy.</p>
+            <p class="about-desc">Advanced AI detection powered by Vision Transformer (ViT) models.</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -846,13 +1070,24 @@ elif st.session_state.page == "about":
     <div class="feature-card">
         <div class="feature-icon">🧠</div>
         <div class="feature-content">
-            <h3>Convolutional Neural Network</h3>
-            <p>Trained on the GenImage dataset containing images from Midjourney, Stable Diffusion, DALL-E, and more.</p>
+            <h3>Vision Transformer (ViT)</h3>
+            <p>State-of-the-art transformer architecture fine-tuned for AI image detection. Two modes: Binary (AI vs Real) and Multiclass (identify the specific AI generator).</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
     # Feature 2
+    st.markdown("""
+    <div class="feature-card">
+        <div class="feature-icon">🎨</div>
+        <div class="feature-content">
+            <h3>Multi-Generator Detection</h3>
+            <p>Identifies images from Midjourney, Stable Diffusion, GLIDE, BigGAN, ADM, VQDM, and Wukong generators.</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Feature 3
     st.markdown("""
     <div class="feature-card">
         <div class="feature-icon">⚡</div>
@@ -863,7 +1098,7 @@ elif st.session_state.page == "about":
     </div>
     """, unsafe_allow_html=True)
     
-    # Feature 3
+    # Feature 4
     st.markdown("""
     <div class="feature-card">
         <div class="feature-icon">🔒</div>
@@ -880,10 +1115,11 @@ elif st.session_state.page == "about":
         <div class="tech-title">Built with</div>
         <div class="tech-tags">
             <span class="tech-tag">Python</span>
-            <span class="tech-tag">TensorFlow</span>
-            <span class="tech-tag">Keras</span>
+            <span class="tech-tag">PyTorch</span>
+            <span class="tech-tag">Transformers</span>
             <span class="tech-tag">Streamlit</span>
-            <span class="tech-tag">CNN Architecture</span>
+            <span class="tech-tag">Vision Transformer (ViT)</span>
+            <span class="tech-tag">Hugging Face</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
