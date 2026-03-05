@@ -218,11 +218,60 @@ section.main > div {{
 }}
 
 .hero-subtitle {{
-    font-size: 16px;
+    font-size: 16px !important;
+    color: {text_secondary} !important;
+    max-width: 520px !important;
+    margin: 0 auto !important;
+    line-height: 1.6 !important;
+    text-align: center !important;
+    display: block !important;
+}}
+
+.hero p.hero-subtitle {{
+    text-align: center !important;
+}}
+
+/* How it works section */
+.how-it-works {{
+    display: flex;
+    justify-content: center;
+    gap: 32px;
+    margin: 24px 0 8px;
+    padding: 20px 0;
+}}
+
+.step {{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    max-width: 140px;
+}}
+
+.step-number {{
+    width: 32px;
+    height: 32px;
+    background: {text_primary};
+    color: {bg_primary};
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+}}
+
+.step-text {{
+    font-size: 13px;
     color: {text_secondary};
-    max-width: 400px;
-    margin: 0 auto;
-    line-height: 1.6;
+    text-align: center;
+    line-height: 1.4;
+}}
+
+.step-arrow {{
+    color: {text_muted};
+    font-size: 20px;
+    margin-top: 4px;
 }}
 
 /* ═══════════════════════════════════════════
@@ -303,11 +352,14 @@ p, span, div, label {{
     color: {text_secondary} !important;
     border-radius: 12px !important;
     padding: 14px 20px !important;
+    transition: all 0.2s ease !important;
 }}
 
 .sample-btn > button:hover {{
     background: {bg_hover} !important;
     border-color: {text_muted} !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important;
 }}
 
 /* ═══════════════════════════════════════════
@@ -640,9 +692,9 @@ VIT_BASE_MODEL = "google/vit-base-patch16-224"
 MULTICLASS_LABELS = ['glide', 'midjourney', 'wukong', 'adm', 'sdv5', 'vqdm', 'biggan']
 
 SAMPLES = [
-    {"name": "Mountain", "icon": "🏔", "url": "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=400"},
-    {"name": "Dog", "icon": "🐕", "url": "https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400"},
-    {"name": "Flower", "icon": "🌷", "url": "https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=400"},
+    {"name": "Real Photo", "icon": "📷", "url": "https://images.unsplash.com/photo-1772307956262-42d4f7696876?q=80&w=2070&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D", "type": "real"},
+    {"name": "AI Portrait", "icon": "🤖", "url": "https://replicate.delivery/pbxt/sWeZFxVsitBmosxgKx1qKGKdvYqPPSbLKCPmokLYqouYEJjE/out-0.png", "type": "ai"},
+    {"name": "Real Dog", "icon": "🐕", "url": "https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400", "type": "real"},
 ]
 
 # Device for PyTorch
@@ -829,11 +881,11 @@ if st.session_state.page == "home":
             st.session_state.result = None
             st.rerun()
         
-        # Check if this is a multiclass result
-        is_multiclass = "all_probs" in res
+        # Check if AI-generated with generator info
+        has_generator_info = res["is_ai"] and "generator" in res
         
-        if is_multiclass:
-            # Multiclass result display - shows AI generator type
+        if has_generator_info:
+            # AI-generated image with generator identification
             sorted_probs = sorted(res["all_probs"].items(), key=lambda x: x[1], reverse=True)
             
             # Build the probability bars HTML
@@ -846,28 +898,28 @@ if st.session_state.page == "home":
                 <div class="result-image-wrap">
                     <img src="data:image/jpeg;base64,{b64}" class="result-img"/>
                     <div class="result-badge ai">
-                        🎨 {res["label"].upper()}
+                        🤖 AI GENERATED
                     </div>
                 </div>
                 <div class="result-body">
                     <div class="result-header">
                         <div>
-                            <div class="result-title">AI Generator Identified</div>
-                            <div class="result-subtitle">Detected: <strong style="text-transform: capitalize;">{res["label"]}</strong></div>
+                            <div class="result-title">AI Generated Image</div>
+                            <div class="result-subtitle">Generator: <strong style="text-transform: capitalize;">{res["generator"]}</strong> ({res["generator_confidence"]:.1f}% confidence)</div>
                         </div>
                         <div class="confidence-display">
                             <div class="confidence-number">{res["confidence"]:.1f}%</div>
-                            <div class="confidence-label">Confidence</div>
+                            <div class="confidence-label">AI Confidence</div>
                         </div>
                     </div>
                     <div style="margin-top: 16px;">
-                        <div style="font-size: 12px; font-weight: 600; color: {text_muted}; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">All Generators Probability</div>
+                        <div style="font-size: 12px; font-weight: 600; color: {text_muted}; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Generator Probability Breakdown</div>
                         """ + probs_html + f"""
                     </div>
                     <div class="stats-row">
                         <div class="stat-box">
                             <div class="stat-value">{res["raw"]:.4f}</div>
-                            <div class="stat-label">Raw Score</div>
+                            <div class="stat-label">AI Score</div>
                         </div>
                         <div class="stat-box">
                             <div class="stat-value">{img.size[0]}×{img.size[1]}</div>
@@ -930,57 +982,41 @@ if st.session_state.page == "home":
         <div class="hero">
             <div class="hero-label">◉ AI Detection</div>
             <h1 class="hero-title">Real or AI?</h1>
-            <p class="hero-subtitle">Upload an image and know instantly if it was created by AI or captured with a camera.</p>
+            <p class="hero-subtitle">Upload an image and know instantly if it was created by AI or captured with a camera. If AI-generated, we'll identify the generator.</p>
+            <div class="how-it-works">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-text">Upload image</div>
+                </div>
+                <div class="step-arrow">→</div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-text">AI analysis</div>
+                </div>
+                <div class="step-arrow">→</div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-text">Get results</div>
+                </div>
+            </div>
         </div>
         """, unsafe_allow_html=True)
-        
-        # Model selector
-        st.markdown(f"""
-        <div style="text-align: center; margin-bottom: 20px;">
-            <div style="font-size: 12px; font-weight: 600; color: {text_muted}; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Select Detection Mode</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        col_mode1, col_mode2 = st.columns(2)
-        with col_mode1:
-            if st.button(
-                "🔍 AI vs Real", 
-                key="mode_binary",
-                type="primary" if st.session_state.model_type == "binary" else "secondary",
-                use_container_width=True,
-                help="Detect if an image is AI-generated or real"
-            ):
-                st.session_state.model_type = "binary"
-                st.rerun()
-        
-        with col_mode2:
-            if st.button(
-                "🎨 Identify Generator", 
-                key="mode_multiclass",
-                type="primary" if st.session_state.model_type == "multiclass" else "secondary",
-                use_container_width=True,
-                help="Identify which AI generator created the image"
-            ):
-                st.session_state.model_type = "multiclass"
-                st.rerun()
-        
-        # Show mode description
-        if st.session_state.model_type == "binary":
-            st.markdown(f'<p style="text-align: center; font-size: 13px; color: {text_muted}; margin: 12px 0 20px;">Classifies images as AI-generated or real photographs</p>', unsafe_allow_html=True)
-        else:
-            st.markdown(f'<p style="text-align: center; font-size: 13px; color: {text_muted}; margin: 12px 0 20px;">Identifies the AI generator: Midjourney, Stable Diffusion, GLIDE, and more</p>', unsafe_allow_html=True)
         
         uploaded = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png", "webp"], label_visibility="collapsed")
         
         if uploaded:
             img = Image.open(uploaded)
             with st.spinner("Analyzing..."):
-                # Use ViT models based on selection
+                # Always run binary classification first
                 tensor = preprocess_vit(img, vit_transform)
-                if st.session_state.model_type == "binary":
-                    res = predict_vit_binary(vit_binary_model, tensor)
-                else:
-                    res = predict_vit_multiclass(vit_multiclass_model, tensor)
+                res = predict_vit_binary(vit_binary_model, tensor)
+                
+                # If AI-generated, also identify the generator
+                if res["is_ai"]:
+                    multiclass_res = predict_vit_multiclass(vit_multiclass_model, tensor)
+                    res["generator"] = multiclass_res["label"]
+                    res["generator_confidence"] = multiclass_res["confidence"]
+                    res["all_probs"] = multiclass_res["all_probs"]
             st.session_state.analyzed_image = img
             st.session_state.result = res
             # Add to history
@@ -1010,12 +1046,16 @@ if st.session_state.page == "home":
                 if st.button(f"{sample['icon']} {sample['name']}", key=f"sample_{i}", use_container_width=True):
                     try:
                         img = load_url(sample['url'])
-                        # Use ViT models based on selection
+                        # Always run binary classification first
                         tensor = preprocess_vit(img, vit_transform)
-                        if st.session_state.model_type == "binary":
-                            res = predict_vit_binary(vit_binary_model, tensor)
-                        else:
-                            res = predict_vit_multiclass(vit_multiclass_model, tensor)
+                        res = predict_vit_binary(vit_binary_model, tensor)
+                        
+                        # If AI-generated, also identify the generator
+                        if res["is_ai"]:
+                            multiclass_res = predict_vit_multiclass(vit_multiclass_model, tensor)
+                            res["generator"] = multiclass_res["label"]
+                            res["generator_confidence"] = multiclass_res["confidence"]
+                            res["all_probs"] = multiclass_res["all_probs"]
                         st.session_state.analyzed_image = img
                         st.session_state.result = res
                         # Add to history
@@ -1062,7 +1102,7 @@ elif st.session_state.page == "about":
         <div class="feature-icon">🧠</div>
         <div class="feature-content">
             <h3>Vision Transformer (ViT)</h3>
-            <p>State-of-the-art transformer architecture fine-tuned for AI image detection. Two modes: Binary (AI vs Real) and Multiclass (identify the specific AI generator).</p>
+            <p>State-of-the-art transformer architecture fine-tuned for AI image detection. First detects if an image is AI-generated, then automatically identifies which AI generator created it.</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -1072,8 +1112,8 @@ elif st.session_state.page == "about":
     <div class="feature-card">
         <div class="feature-icon">🎨</div>
         <div class="feature-content">
-            <h3>Multi-Generator Detection</h3>
-            <p>Identifies images from Midjourney, Stable Diffusion, GLIDE, BigGAN, ADM, VQDM, and Wukong generators.</p>
+            <h3>Smart Generator Detection</h3>
+            <p>When an AI image is detected, automatically identifies the generator: Midjourney, Stable Diffusion, GLIDE, BigGAN, ADM, VQDM, or Wukong. Real photos won't show misleading generator results.</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
