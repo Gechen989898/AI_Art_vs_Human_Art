@@ -50,13 +50,15 @@ if "feedback_submitted" not in st.session_state:
 is_dark = st.session_state.theme == "dark"
 
 # Theme colors
-bg_primary = "#0a0a0a" if is_dark else "#fafafa"
-bg_card = "#171717" if is_dark else "#ffffff"
-bg_hover = "#262626" if is_dark else "#f4f4f5"
-border_color = "#262626" if is_dark else "#e4e4e7"
-text_primary = "#fafafa" if is_dark else "#09090b"
-text_secondary = "#a1a1aa" if is_dark else "#52525b"
-text_muted = "#71717a" if is_dark else "#a1a1aa"
+bg_primary = "#0b1121" if is_dark else "#f0f4fa"
+bg_card = "#121d33" if is_dark else "#ffffff"
+bg_hover = "#1a2744" if is_dark else "#e8eef6"
+border_color = "#1e3055" if is_dark else "#c7d4e4"
+text_primary = "#eef2f9" if is_dark else "#0b1a3e"
+text_secondary = "#8a9bb8" if is_dark else "#4a5e80"
+text_muted = "#5c7099" if is_dark else "#8a9bb8"
+accent_color = "#3b82f6"  # bright blue accent for both themes
+accent_hover = "#2563eb"  # darker blue for hover states
 
 st.markdown(f"""
 <style>
@@ -144,12 +146,12 @@ section.main > div {{
 .brand-logo {{
     width: 28px;
     height: 28px;
-    background: {text_primary};
+    background: {accent_color};
     border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: {bg_primary};
+    color: #ffffff;
     font-size: 14px;
     font-weight: 600;
 }}
@@ -180,13 +182,13 @@ section.main > div {{
 }}
 
 .stButton > button[kind="primary"] {{
-    background: {text_primary} !important;
-    color: {bg_primary} !important;
+    background: {accent_color} !important;
+    color: #ffffff !important;
     border: none !important;
 }}
 
 .stButton > button[kind="primary"]:hover {{
-    background: {text_secondary} !important;
+    background: {accent_hover} !important;
 }}
 
 /* ═══════════════════════════════════════════
@@ -202,12 +204,12 @@ section.main > div {{
     align-items: center;
     gap: 6px;
     padding: 6px 12px;
-    background: {bg_hover};
-    border: 1px solid {border_color};
+    background: {'#0d2457' if is_dark else '#dbeafe'};
+    border: 1px solid {'#1e3a6e' if is_dark else '#93c5fd'};
     border-radius: 100px;
     font-size: 12px;
     font-weight: 600;
-    color: {text_secondary};
+    color: {accent_color};
     margin-bottom: 14px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -261,8 +263,8 @@ section.main > div {{
 .step-number {{
     width: 32px;
     height: 32px;
-    background: {text_primary};
-    color: {bg_primary};
+    background: {accent_color};
+    color: #ffffff;
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -295,13 +297,13 @@ section.main > div {{
 }}
 
 [data-testid="stFileUploader"] > section:hover {{
-    border-color: {text_muted} !important;
+    border-color: {accent_color} !important;
     background: {bg_hover} !important;
 }}
 
 [data-testid="stFileUploader"] button {{
-    background: {text_primary} !important;
-    color: {bg_primary} !important;
+    background: {accent_color} !important;
+    color: #ffffff !important;
     border: none !important;
     border-radius: 8px !important;
     padding: 10px 20px !important;
@@ -367,9 +369,9 @@ p, span, div, label {{
 
 .sample-btn > button:hover {{
     background: {bg_hover} !important;
-    border-color: {text_muted} !important;
+    border-color: {accent_color} !important;
     transform: translateY(-2px) !important;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important;
+    box-shadow: 0 4px 16px rgba(59,130,246,0.15) !important;
 }}
 
 /* ═══════════════════════════════════════════
