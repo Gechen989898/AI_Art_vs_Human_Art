@@ -12,7 +12,6 @@ timm>=0.6
 transformers>=4.30
 safetensors>=0.3
 streamlit>=1.20
-tensorflow>=2.11,<3.0
 numpy>=1.23
 Pillow>=9.0
 requests>=2.28
