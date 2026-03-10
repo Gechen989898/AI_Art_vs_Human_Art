@@ -25,7 +25,7 @@ transformers>=4.30
 safetensors>=0.3
 streamlit
 torch
-tensorflow
+# tensorflow
 transformers
 pillow
 numpy
