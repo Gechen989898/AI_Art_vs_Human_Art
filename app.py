@@ -14,7 +14,7 @@ from torchvision import transforms
 # CONFIG
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 st.set_page_config(
-    page_title="Authentic",
+    page_title="ImageTruth",
     page_icon="◉",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -28,7 +28,7 @@ if "analyzed_image" not in st.session_state:
 if "result" not in st.session_state:
     st.session_state.result = None
 if "theme" not in st.session_state:
-    st.session_state.theme = "light"
+    st.session_state.theme = "dark"
 if "history" not in st.session_state:
     st.session_state.history = []
 if "model_type" not in st.session_state:
@@ -106,6 +106,11 @@ div[data-testid="stStatusWidget"], .stApp > header,
 
 [data-testid="stVerticalBlock"] {{
     gap: 0 !important;
+}}
+
+/* Restore gap in columns containing file uploaders so labels don't get clipped */
+[data-testid="stColumn"] > [data-testid="stVerticalBlock"] {{
+    gap: 0.5rem !important;
 }}
 
 [data-testid="stAppViewContainer"] > section > div {{
@@ -215,13 +220,25 @@ section.main > div {{
     letter-spacing: 0.5px;
 }}
 
-.hero-title {{
-    font-size: 40px;
-    font-weight: 700;
-    color: {text_primary} !important;
+.hero-app-name {{
+    font-size: 52px;
+    font-weight: 800;
+    background: linear-gradient(135deg, {accent_color}, #60a5fa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
     line-height: 1.1;
     letter-spacing: -0.03em;
-    margin-bottom: 10px;
+    margin-bottom: 6px;
+}}
+
+.hero-title {{
+    font-size: 32px;
+    font-weight: 600;
+    color: {text_secondary} !important;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin-bottom: 12px;
 }}
 
 .hero h1, .hero-title, h1 {{
@@ -1053,8 +1070,11 @@ p, span, div, label {{
     .main .block-container {{
         padding: 1rem !important;
     }}
+    .hero-app-name {{
+        font-size: 36px;
+    }}
     .hero-title {{
-        font-size: 28px;
+        font-size: 22px;
     }}
     .stats-row {{
         grid-template-columns: 1fr;
@@ -1066,6 +1086,64 @@ p, span, div, label {{
         font-size: 16px;
     }}
 }}
+
+/* ═══════════════════════════════════════════
+   DARK MODE FIXES
+═══════════════════════════════════════════ */
+/* Text input styling */
+[data-testid="stTextInput"] input {{
+    background: {bg_card} !important;
+    color: {text_primary} !important;
+    border: 1px solid {border_color} !important;
+    border-radius: 8px !important;
+}}
+
+[data-testid="stTextInput"] input::placeholder {{
+    color: {text_muted} !important;
+}}
+
+/* Fix file uploader icon color in dark mode */
+[data-testid="stFileUploader"] svg {{
+    color: {text_secondary} !important;
+    fill: {text_secondary} !important;
+}}
+
+/* Fix uploader drag area inner text */
+[data-testid="stFileUploadDropzone"] {{
+    background: {bg_card} !important;
+    border-color: {border_color} !important;
+}}
+
+[data-testid="stFileUploadDropzone"] span {{
+    color: {text_secondary} !important;
+}}
+
+[data-testid="stFileUploadDropzone"] small {{
+    color: {text_muted} !important;
+}}
+
+/* Fix stButton secondary borders in dark mode */
+.stButton > button:not([kind="primary"]) {{
+    border: 1px solid {border_color} !important;
+}}
+
+/* Fix column dividers and spacing */
+[data-testid="stHorizontalBlock"] {{
+    gap: 1rem;
+}}
+
+/* Improve spinner and status text */
+.stSpinner > div {{
+    color: {text_secondary} !important;
+}}
+
+/* Fix any stale white backgrounds in dark mode */
+.stAlert {{
+    background: {bg_card} !important;
+    border-color: {border_color} !important;
+    color: {text_primary} !important;
+}}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1258,7 +1336,7 @@ def analyze_image(img, vit_transform, vit_binary_model, vit_multiclass_model):
 col1, col2, col3, col4, col5 = st.columns([3, 4, 1, 1, 0.5])
 
 with col1:
-    st.markdown('<div class="brand"><div class="brand-logo">A</div>Authentic</div>', unsafe_allow_html=True)
+    st.markdown('<div class="brand"><div class="brand-logo">I</div>ImageTruth</div>', unsafe_allow_html=True)
 
 with col3:
     if st.button("Detect", key="nav_detect", type="primary" if st.session_state.page == "home" else "secondary"):
@@ -1463,6 +1541,7 @@ if st.session_state.page == "home":
         st.markdown("""
         <div class="hero">
             <div class="hero-label">◉ AI Detection</div>
+            <div class="hero-app-name">ImageTruth</div>
             <h1 class="hero-title">Real or AI?</h1>
             <p class="hero-subtitle">Upload an image and know instantly if it was created by AI or captured with a camera. If AI-generated, we'll identify the generator.</p>
         </div>
@@ -1584,11 +1663,11 @@ if st.session_state.page == "home":
             col1, col2 = st.columns(2)
             
             with col1:
-                st.markdown(f'<p style="font-size: 13px; font-weight: 600; color: {text_primary}; margin-bottom: 8px;">Image 1</p>', unsafe_allow_html=True)
+                st.markdown(f'<p style="font-size: 13px; font-weight: 600; color: {text_primary}; margin-bottom: 12px; padding-bottom: 4px; position: relative; z-index: 1;">Image 1</p>', unsafe_allow_html=True)
                 uploaded1 = st.file_uploader("Upload first image", type=["jpg", "jpeg", "png", "webp"], label_visibility="collapsed", key="compare_1")
             
             with col2:
-                st.markdown(f'<p style="font-size: 13px; font-weight: 600; color: {text_primary}; margin-bottom: 8px;">Image 2</p>', unsafe_allow_html=True)
+                st.markdown(f'<p style="font-size: 13px; font-weight: 600; color: {text_primary}; margin-bottom: 12px; padding-bottom: 4px; position: relative; z-index: 1;">Image 2</p>', unsafe_allow_html=True)
                 uploaded2 = st.file_uploader("Upload second image", type=["jpg", "jpeg", "png", "webp"], label_visibility="collapsed", key="compare_2")
             
             if uploaded1 and uploaded2:
