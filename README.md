@@ -185,7 +185,6 @@ These are useful for project history and experimentation, but the current Stream
 
 - First-run startup depends on downloading transformer model weights.
 - Prediction confidence is not a guarantee of correctness, especially for edited, compressed, or out-of-distribution images.
-- The workspace is research-heavy and includes large local datasets and legacy artifacts.
 - There is no automated test suite in the current repository.
 
 ## Team
